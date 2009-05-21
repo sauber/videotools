@@ -219,6 +219,27 @@ sub convertrecipe {
 mencoder \\
   -vf kerndeint$p{crop}$p{scale},expand=720:480,dsize=16/9,pp=al,denoise3d \\
   $p{slang} \\
+  $p{alang} -oac faac -faacopts br=128 \\
+  -af volnorm \\
+  -ovc x264 -x264encopts bitrate=1400 \\
+  -ofps 30000/1001 \\
+  -dvd-device $p{srcfile} dvd://$p{title} $p{chapters} \\
+  -of lavf -lavfopts format=psp \\
+  -o $p{dstfile}
+
+EOF
+}
+
+sub old_convertrecipe {
+  my %p = @_;
+
+  <<EOF;
+
+# Decode Title $p{title} $p{chapters}
+# Apply all filters, scaling, and language options
+mencoder \\
+  -vf kerndeint$p{crop}$p{scale},expand=720:480,dsize=16/9,pp=al,denoise3d \\
+  $p{slang} \\
   $p{alang} -oac pcm -af volnorm \\
   -ovc lavc -lavcopts vcodec=ffv1:aspect=16/9 -ofps 30000/1001 \\
   -dvd-device $p{srcfile} dvd://$p{title} $p{chapters} \\
@@ -235,6 +256,7 @@ ffmpeg \\
 rm $p{dstfile}.ffv1
 EOF
 }
+
 
 
 
