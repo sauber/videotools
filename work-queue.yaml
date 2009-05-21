@@ -1,0 +1,40 @@
+--- 
+- 
+  description: Theoder=>theodor4-1.mp4, t=4, c=1
+  input: ~/Desktop/ISO/Thomas og Snelokomotivet
+  output: tmp/theodor4-1.mp4
+  progress: done
+- 
+  description: Theoder=>theodor5-1.mp4, t=5, c=1
+  dvdtitle: 16
+  cropping: 706:576:4:0
+  pixelaspect: 1.42221
+  resize: 720x414
+  padding: 0x33
+  preset: psp720
+  audiolanguage: da
+  subtitlelanguage: ja
+  videoprefilters: kerndeint
+  videopostfilters: al,denoise3d
+  input: ~/Desktop/ISO/Thomas og Snelokomotivet
+  output: tmp/theodor5-1.mp4
+  sample: 10
+  progress: todo
+-
+  description: MONSTERS_INC => monters-05, t=5
+  dvdtitle: 5
+  cropping: 706:464:8:6
+  subtitlelanguage: ja
+  sample: 25-35
+  inputresolution: 720x480
+  displayresolution: 854x480
+  pixelaspect: 1.18610
+  resize: 720x400
+  audiolanguage: en
+  videoprefilters: kerndeint
+  videopostfilters: al,denoise3d
+  input: ~/Desktop/ISO/MONSTERS_INC
+  output: /tmp/monsters-05.mp4
+  progress: todo
+  preset: psp720
+  tmpfile: /tmp/monsters05

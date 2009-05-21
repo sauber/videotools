@@ -1,0 +1,32 @@
+# Decode DVD with mencoder, and encode with ffmpeg
+mencoder -ovc copy -oac copy -of mpeg -o - dvd://7 -dvd-device ~/Desktop/ISO/THEODOR_02 | ffmpeg -i - -t 10 /tmp/theodor.mp4
+
+# Extract DVD information with mencoder
+
+# create yuv4mpeg pipe format, rescaled, deinterlaced, and noice filtered
+mplayer -vf kerndeint,crop=706:576:4:0,scale=720:414,expand=720:480,dsize=720:480,pp=al,denoise3d -dvd-device ~/Desktop/ISO/Thomas\ og\ Snelokomotivet dvd://16 -vo yuv4mpeg:file=/tmp/thomas16-pp.yuv -nosound -quiet -frames 100
+
+# Extract a pcm audio track, volume normalized
+mplayer -alang da -af volnorm -vc null -vo null -dvd-device ~/Desktop/ISO/Thomas\ og\ Snelokomotivet dvd://1 -ao pcm:fast:file=/tmp/theodor01.wav
+
+# Display subtitles
+mplayer -dvd-device ~/Desktop/ISO/MONSTERS_INC dvd://5 -slang ja -ss 20
+
+# If DVD is NTSC, add options
+-vf pullup,softskip
+
+# Mix yuv and wav file to PSP file
+ffmpeg -f yuv4mpegpipe -i /tmp/monsters-05.yuv -i /tmp/monsters-05.wav -vcodec libx264 -y /tmp/monsters-05.mp4
+
+# Copy all streams of a DVD tile:
+mplayer dvd://1 -dumpstream -dumpfile /tmp/file.mpg
+
+# Create a stream with video and one audiotrack perfectly in sync, and
+#   with overlay subtitle. Lossless video frames. Lossless audio.
+mencoder -vf kerndeint,pullup,softskip,crop=706:464:8:6,scale=720:400,expand=720:480,dsize=720:480,pp=al,denoise3d -dvd-device ~/Desktop/ISO/MONSTERS_INC dvd://5 -ss 25 -endpos 35 -slang ja -alang en -oac pcm -af volnorm  -ovc lavc -lavcopts vcodec=ffv1 -ofps 24000/1001 -o /tmp/monsters-05.mpg
+
+# Convert lossless dump to AVC.
+ffmpeg -i /tmp/monsters-05.mpg -vcodec libx264 -ac 2 /tmp/monsters-05.mp4
+
+# Convert loss dump to AVC, slightly higher quality, maybe:
+ffmpeg -i /tmp/monsters-05.mpg -vcodec libx264 -ac 2 -ab 128k -ar 48000 -y -mbd 2 -cmp 3 -precmp 3 -subcmp 3 -trellis 2 -flags +4mv -level 30 -refs 2 -b 1400k -bt 1400k -threads 0 /tmp/monsters-05.mp4
