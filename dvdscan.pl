@@ -219,12 +219,11 @@ sub convertrecipe {
 mencoder \\
   -vf kerndeint$p{crop}$p{scale},expand=720:480,dsize=16/9,pp=al,denoise3d \\
   $p{slang} \\
-  $p{alang} -oac faac -faacopts br=128 \\
-  -af volnorm \\
-  -ovc x264 -x264encopts bitrate=1400 \\
-  -ofps 30000/1001 \\
+  $p{alang} -oac lavc -lavcopts acodec=libfaac:aglobal=1 \\
+  -af volnorm=1:.99 \\
+  -ovc x264 -x264encopts bitrate=1400:global_header:level_idc=30 \\
   -dvd-device $p{srcfile} dvd://$p{title} $p{chapters} \\
-  -of lavf -lavfopts format=psp \\
+  -of lavf \\
   -o $p{dstfile}
 
 EOF
