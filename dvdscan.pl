@@ -155,7 +155,7 @@ sub writebatch {
     print BATCH <<EOF;
 
 # Create destination folder
-mkdir $dvd{folder}
+mkdir "$dvd{folder}"
 EOF
 
     for my $title ( selectedtitles() ) {
@@ -222,9 +222,9 @@ mencoder \\
   $p{alang} -oac lavc -lavcopts acodec=libfaac:aglobal=1 \\
   -af volnorm=1:.99 \\
   -ovc x264 -x264encopts bitrate=1400:global_header:level_idc=30 \\
-  -dvd-device $p{srcfile} dvd://$p{title} $p{chapters} \\
+  -dvd-device "$p{srcfile}" dvd://$p{title} $p{chapters} \\
   -of lavf \\
-  -o $p{dstfile}
+  -o "$p{dstfile}"
 
 EOF
 }
@@ -402,9 +402,15 @@ sub langcompare {
     # Preferred language must be first
     return $lang[0];
   } else {
-    # Preferred language must be about the choice
+    # Preferred language must be among the choices
     return $pref if inarray($pref,@lang);
   }
+
+  # None of our choices are available. And we are ok with no language then.
+  return not undef if $pref eq 'none';
+
+  # Nothing matches
+  return undef;
 }
 
 # Select language according to preferences
@@ -763,7 +769,7 @@ dvdtitlescan($ARGV[0]);
 for my $n ( keys %{$dvd{title}} ) {
   dvdtitleinfo($n);
 }
-#x '%dvd', \%dvd;
+x '%dvd', \%dvd;
 selecttitles();
 tuning();
 
