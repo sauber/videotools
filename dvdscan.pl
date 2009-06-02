@@ -425,6 +425,7 @@ sub langselect {
   #);
   my @pref = qw(
     DA:jp DA:en DA:none JA:en JA:da EN:ja EN:none JA:none
+    da:jp da:en da:none ja:en ja:da en:ja en:none ja:none
   );
   my @audio = @{$dvd{title}{$title}{audiolang}};
   my @subtitle = @{$dvd{title}{$title}{subtitle}};
@@ -466,6 +467,7 @@ sub langselect {
     #$dvd{title}{$title}{selectedaudio} = $prefa if $prefa;
     #$dvd{title}{$title}{selectedsubtitle} = $prefs if $prefs;
     langset($title, $choice);
+    x $title, $dvd{$title};
   } else {
     delete $dvd{title}{$title}{selected};
   }
@@ -769,7 +771,7 @@ dvdtitlescan($ARGV[0]);
 for my $n ( keys %{$dvd{title}} ) {
   dvdtitleinfo($n);
 }
-x '%dvd', \%dvd;
+#x '%dvd', \%dvd;
 selecttitles();
 tuning();
 
