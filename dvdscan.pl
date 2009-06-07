@@ -276,6 +276,9 @@ sub resize {
   my($xd,$yd) = split 'x', $dvd{title}{$title}{displayresolution};
   my($xc,$yc) = split /[:x]/, $dvd{title}{$title}{crop};
 
+  return unless $xi and $yi;
+  #x "resize $title", $dvd{title}{$title};
+
   my $xr = $xd * $xc / $xi;         # 854 * 704 / 720 => 835
   my $yr = $yd * $yc / $yi;         # 480 * 464 / 480 => 464
   my($xo,$yo,$b);
@@ -467,7 +470,7 @@ sub langselect {
     #$dvd{title}{$title}{selectedaudio} = $prefa if $prefa;
     #$dvd{title}{$title}{selectedsubtitle} = $prefs if $prefs;
     langset($title, $choice);
-    x $title, $dvd{$title};
+    #x $title, $dvd{$title};
   } else {
     delete $dvd{title}{$title}{selected};
   }
