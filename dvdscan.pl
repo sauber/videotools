@@ -159,24 +159,27 @@ mkdir "$dvd{folder}"
 EOF
 
     for my $title ( selectedtitles() ) {
+      my($start,$end) = split '-', $dvd{title}{$title}{sample};
+      $end -= $start;
+
       # Scaling and languages
-      my $alang = $dvd{title}{$title}{selectedaudio}
-                ? "-alang $dvd{title}{$title}{selectedaudio}"
-                : '' ;
-      my $slang = $dvd{title}{$title}{selectedsubtitle}
-                ? "-slang $dvd{title}{$title}{selectedsubtitle}"
-                : '' ;
-      my $resize = $dvd{title}{$title}{selectedsubtitle}
-                ? "-slang $dvd{title}{$title}{selectedsubtitle}"
-                : '' ;
-      my $crop  = $dvd{title}{$title}{crop}
-                ? ",crop=$dvd{title}{$title}{crop}"
-                : '' ;
-         $crop  =~ s/x/:/g;
-      my $scale = $dvd{title}{$title}{resize}
-                ? ",scale=$dvd{title}{$title}{resize}"
-                : '' ;
-         $scale =~ s/x/:/g;
+      my $alang  = $dvd{title}{$title}{selectedaudio}
+                 ? "-alang $dvd{title}{$title}{selectedaudio}"
+                 : '' ;
+      my $slang  = $dvd{title}{$title}{selectedsubtitle}
+                 ? "-slang $dvd{title}{$title}{selectedsubtitle}"
+                 : '' ;
+      my $sample = $dvd{title}{preview}
+                 ? "-ss $start -endpos $end"
+                 : '' ;
+      my $crop   = $dvd{title}{$title}{crop}
+                 ? ",crop=$dvd{title}{$title}{crop}"
+                 : '' ;
+         $crop   =~ s/x/:/g;
+      my $scale  = $dvd{title}{$title}{resize}
+                 ? ",scale=$dvd{title}{$title}{resize}"
+                 : '' ;
+         $scale  =~ s/x/:/g;
 
       # Check if we should do whole stream, and chapter by chapter
       my $numfiles = $dvd{title}{$title}{eachchapter}
@@ -198,6 +201,7 @@ EOF
           srcfile  => $dvd{src},
           dstfile  => $dstfile,
           chapters => $chapters,
+          sample   => $sample,
         );
       }
     }
@@ -218,8 +222,9 @@ sub convertrecipe {
 # Apply all filters, scaling, and language options
 mencoder \\
   -vf kerndeint$p{crop}$p{scale},expand=720:480,dsize=16/9,pp=al,denoise3d \\
-  $p{slang} \\
-  $p{alang} -oac lavc -lavcopts acodec=libfaac:aglobal=1 \\
+  $p{sample} \\
+  $p{alang} $p{slang} \\
+  -oac lavc -lavcopts acodec=libfaac:aglobal=1 \\
   -af volnorm=1:.99 \\
   -ovc x264 -x264encopts bitrate=1400:global_header:level_idc=30 \\
   -dvd-device "$p{srcfile}" dvd://$p{title} $p{chapters} \\
@@ -633,24 +638,24 @@ sub tuning {
   do {
     my $response = menuoptions();
     for ( $response ) {
-      /^a\s*(.*)/  and cropdetect($1 || $dvd{current}),         next;
-      /^b\s*(.+)/  and cropset($dvd{current}, $1),              next;
-      /^c\s*(.*)/  and croppreview($1 || $dvd{current}),        next;
+      /^a\s*(.*)/  and cropdetect($1 || $dvd{current}),          next;
+      /^b\s*(.+)/  and cropset($dvd{current}, $1),               next;
+      /^c\s*(.*)/  and croppreview($1 || $dvd{current}),         next;
       /^d/         and print "Not implemented\n";
-      /^f\s+(.*)/  and $dvd{title}{$dvd{current}}{file} = $1,   next;
-      /^g\s+(.*)/  and $dvd{folder} = $1,                       next;
-      /^h\s*(.*)/  and chaptertogle($1 || $dvd{current}),       next;
-      /^i\s*(\d*)/ and encodesummary($1 || $dvd{current}),      next;
-      /^l\s+(.*)/  and langset($dvd{current}, $1),              next;
-      /^m/         and                                          next;
-      /^p/         and print "Not implemented\n";
-      /^q/         and $done = 1,                               next;
+      /^f\s+(.*)/  and $dvd{title}{$dvd{current}}{file} = $1,    next;
+      /^g\s+(.*)/  and $dvd{folder} = $1,                        next;
+      /^h\s*(.*)/  and chaptertogle($1 || $dvd{current}),        next;
+      /^i\s*(\d*)/ and encodesummary($1 || $dvd{current}),       next;
+      /^l\s+(.*)/  and langset($dvd{current}, $1),               next;
+      /^m/         and                                           next;
+      /^p/         and $dvd{title}{preview} = $1,                next;
+      /^q/         and $done = 1,                                next;
       /^r/         and print "Not implemented\n";
-      /^s+(.*)/    and $dvd{title}{$dvd{current}}{sample} = $1, next;
-      /^t\s+(\d+)/ and $dvd{current} = $1,                      next;
-      /^(\d+)/     and $dvd{current} = $1,                      next;
+      /^s+(.*)/    and $dvd{title}{$dvd{current}}{sample} = $1,  next;
+      /^t\s+(\d+)/ and $dvd{current} = $1,                       next;
+      /^(\d+)/     and $dvd{current} = $1,                       next;
       /^u/         and print "Not implemented\n";
-      /^w/         and writebatch(),                            next;
+      /^w/         and writebatch(),                             next;
     }
   } until $done;
 }
