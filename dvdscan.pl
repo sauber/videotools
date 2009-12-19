@@ -148,6 +148,13 @@ sub cropdetect {
 ### Writing Batch Scripts
 ########################################################################
 
+# Check if string is a number
+#
+sub isnum {
+  return undef if $_[0] =~ /\D/;
+  return 1;
+}
+
 # Write batch script to convert media
 #
 sub writebatch {
@@ -159,19 +166,30 @@ mkdir "$dvd{folder}"
 EOF
 
     for my $title ( selectedtitles() ) {
-      my($start,$end) = split '-', $dvd{title}{$title}{sample};
-      $end -= $start;
+      # Start/stop for preview
+      # XXX: Adjust to start of each chapter
+      my $sample = '';
+      if ( $dvd{title}{preview} ) {
+        my($start,$end) = split '-', $dvd{title}{$title}{sample};
+        $end -= $start;
+        $sample = "-ss $start -endpos $end";
+      }
 
-      # Scaling and languages
-      my $alang  = $dvd{title}{$title}{selectedaudio}
-                 ? "-alang $dvd{title}{$title}{selectedaudio}"
-                 : '' ;
-      my $slang  = $dvd{title}{$title}{selectedsubtitle}
-                 ? "-slang $dvd{title}{$title}{selectedsubtitle}"
-                 : '' ;
-      my $sample = $dvd{title}{preview}
-                 ? "-ss $start -endpos $end"
-                 : '' ;
+      # Choose alang/aid and slang/sid languages
+      my $alang = '';
+      if ( my $audio = $dvd{title}{$title}{selectedaudio} ) {
+        $alang = isnum($audio)
+               ? "-aid   $audio"
+               : "-alang $audio" ;
+      }
+      my $slang = '';
+      if ( my $audio = $dvd{title}{$title}{selectedsubtitle} ) {
+        $slang = isnum($audio)
+               ? "-sid   $audio"
+               : "-slang $audio" ;
+      }
+
+      # Scaling
       my $crop   = $dvd{title}{$title}{crop}
                  ? ",crop=$dvd{title}{$title}{crop}"
                  : '' ;
