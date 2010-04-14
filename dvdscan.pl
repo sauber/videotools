@@ -23,6 +23,7 @@ use strict;
 use Term::Prompt;
 
 our $scandvd = 'mplayer -identify -frames 1 -vo null -ao null -dvd-device';
+our $scanfile = 'mplayer -identify -frames 1 -vo null -ao null';
 our %dvd;
 
 # Dump a data sctructure
@@ -63,6 +64,40 @@ sub dvdtitlescan {
   close SCAN;
 }
 
+# Read length of video file.
+# XXX: Probably not needed at all, since length is for autoselection
+#
+sub filetitlescan {
+  my $input = shift;
+
+  $dvd{src} = $input;
+  my $file = $input;
+  $dvd{batch} = "$file.batch.sh";
+  $file =~ s/\..+?$/\.mp4/; # Change extension to .mp4
+  $dvd{folder} = "/Users/sauber/Desktop/PSP";
+  $dvd{title}{1}{file} = $file;
+  $dvd{title}{1}{selected} =  1;
+  $dvd{title}{1}{chapters} =  1;
+  open SCAN, qq,$scanfile "$input" dvd:// 2>/dev/null |,;
+    while (<SCAN>) {
+      /ID_LENGTH=([\d\.]+)/ and do {
+        $dvd{title}{1}{length}   = $1;
+      };
+      /VO: \[null\] (\d+x\d+) => (\d+x\d+)/ and do {
+        $dvd{title}{1}{videoresolution}   = $1;
+        $dvd{title}{1}{displayresolution} = $2;
+
+      };
+    }
+  #close SCAN;
+  $dvd{title}{1}{selected} =  1;
+  $dvd{title}{1}{chapters} =  1;
+  $dvd{current}  =  1;
+  $dvd{title}{1}{sample} = '25-75';
+  resize(1);
+  #x "title 1", $dvd{title}{1};
+}
+
 # Read information about a Title
 #  - Audio Language
 #  - Subtitle languages
@@ -82,21 +117,6 @@ sub dvdtitleinfo {
   $chapters = scalar @c;
   my($length) = $info =~ /ID_LENGTH=(\S+)/;
   my($resin,$resout) = $info =~ /VO: \[null\] (\d+x\d+) => (\d+x\d+)/;
-  #my $crop = cropdetect($input,$title);
-  #my @resize = resize($resin, $resout, $crop);
-  #warn "resize: @resize\n";
-  #return 
-  #  $title,
-  #  $length,
-  #  $chapters,
-  #  $resin,
-  #  $resout,
-  #  $crop,
-  #  sprintf("%dx%d",@resize),
-  #  sprintf("%.1f%%", 100 * $resize[2]),
-  #  join(',',@lang),
-  #  join(',',@subt),
-  #  ;
   my %U;
   # XXX: Bunch of defaults here. Get user preferences somewhere else
   $dvd{title}{$title}{audiolang} = [ grep { !$U{$_}++ } @lang ];
@@ -228,13 +248,12 @@ EOF
 }
 
 # Convert one video stream into another.
-# Use mencoder for decoding, and ffmpeg to encode.
-# ffv1 is a lossless format that both tools understand.
 #
 sub convertrecipe {
   my %p = @_;
 
-  <<EOF;
+  if ( -d $p{srcfile} ) {
+    <<EOF;
 
 # Decode Title $p{title} $p{chapters}
 # Apply all filters, scaling, and language options
@@ -245,41 +264,31 @@ mencoder \\
   -oac lavc -lavcopts acodec=libfaac:aglobal=1 \\
   -af volnorm=1:.99 \\
   -ovc x264 -x264encopts bitrate=1400:global_header:level_idc=30 \\
-  -dvd-device "$p{srcfile}" dvd://$p{title} $p{chapters} \\
   -of lavf \\
-  -o "$p{dstfile}"
+  -o "$p{dstfile}" \\
+  -dvd-device "$p{srcfile}" dvd://$p{title} $p{chapters}
 
 EOF
-}
 
-sub old_convertrecipe {
-  my %p = @_;
+  } else {
 
-  <<EOF;
+    <<EOF;
 
 # Decode Title $p{title} $p{chapters}
 # Apply all filters, scaling, and language options
 mencoder \\
   -vf kerndeint$p{crop}$p{scale},expand=720:480,dsize=16/9,pp=al,denoise3d \\
-  $p{slang} \\
-  $p{alang} -oac pcm -af volnorm \\
-  -ovc lavc -lavcopts vcodec=ffv1:aspect=16/9 -ofps 30000/1001 \\
-  -dvd-device $p{srcfile} dvd://$p{title} $p{chapters} \\
-  -o $p{dstfile}.ffv1
+  $p{sample} \\
+  -oac lavc -lavcopts acodec=libfaac:aglobal=1 \\
+  -af volnorm=1:.99 \\
+  -ovc x264 -x264encopts bitrate=1400:global_header:level_idc=30 \\
+  -of lavf \\
+  -o "$p{dstfile}" \\
+  "$p{srcfile}"
 
-# Encode Title $p{title} $p{chapters}
-ffmpeg \\
-  -i $p{dstfile}.ffv1 \\
-  -acodec libfaac -ac 2 -ab 128k -ar 48000 \\
-  -vcodec libx264 -vpre hq -vpre main -refs 2 -b 1400k -bt 1400k -threads 0 \\
-  -psnr \\
-  -y $p{dstfile}
-
-rm $p{dstfile}.ffv1
 EOF
+  }
 }
-
-
 
 
 
@@ -793,11 +802,15 @@ EOF
 usage unless $ARGV[0];
 die "cannot read $ARGV[0]\n" unless -r $ARGV[0];
 
-dvdtitlescan($ARGV[0]);
-for my $n ( keys %{$dvd{title}} ) {
-  dvdtitleinfo($n);
+if ( -d $ARGV[0] ) {
+  dvdtitlescan($ARGV[0]);
+  for my $n ( keys %{$dvd{title}} ) {
+    dvdtitleinfo($n);
+  }
+  selecttitles();
+} else {
+  filetitlescan($ARGV[0]);
 }
-#x '%dvd', \%dvd;
-selecttitles();
-tuning();
 
+#x '%dvd', \%dvd;
+tuning();
