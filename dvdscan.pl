@@ -52,7 +52,7 @@ sub dvdtitlescan {
   $dvd{batch} = "$dir.batch.sh";
   $dir =~ s/^.*\///;  # Remove path
   $dvd{dir} = $dir;
-  $dvd{folder} = "/Users/sauber/Desktop/PSP/$dir";
+  $dvd{folder} = "/data/media/Video/Convert/$dir";
   open SCAN, qq,$scandvd "$input" dvd:// 2>/dev/null |,;
     while (<SCAN>) {
       /ID_DVD_TITLE_(\d+)_CHAPTERS=(\d+)/ and $dvd{title}{$1}{chapters} = $2;
@@ -74,11 +74,11 @@ sub filetitlescan {
   my $file = $input;
   $dvd{batch} = "$file.batch.sh";
   $file =~ s/\..+?$/\.mp4/; # Change extension to .mp4
-  $dvd{folder} = "/Users/sauber/Desktop/PSP";
+  $dvd{folder} = "/data/media/Video/Convert";
   $dvd{title}{1}{file} = $file;
   $dvd{title}{1}{selected} =  1;
   $dvd{title}{1}{chapters} =  1;
-  open SCAN, qq,$scanfile "$input" dvd:// 2>/dev/null |,;
+  open SCAN, qq,$scanfile "$input" 2>/dev/null |,;
     while (<SCAN>) {
       /ID_LENGTH=([\d\.]+)/ and do {
         $dvd{title}{1}{length}   = $1;
@@ -263,7 +263,7 @@ mencoder \\
   $p{alang} $p{slang} \\
   -oac lavc -lavcopts acodec=libfaac:aglobal=1 \\
   -af volnorm=1:.99 \\
-  -ovc x264 -x264encopts bitrate=1400:global_header:level_idc=30 \\
+  -ovc x264 -x264encopts bitrate=1400:global_header:level_idc=30:threads=auto \\
   -of lavf \\
   -o "$p{dstfile}" \\
   -dvd-device "$p{srcfile}" dvd://$p{title} $p{chapters}
@@ -281,7 +281,7 @@ mencoder \\
   $p{sample} \\
   -oac lavc -lavcopts acodec=libfaac:aglobal=1 \\
   -af volnorm=1:.99 \\
-  -ovc x264 -x264encopts bitrate=1400:global_header:level_idc=30 \\
+  -ovc x264 -x264encopts bitrate=1400:global_header:level_idc=30:threads=auto \\
   -of lavf \\
   -o "$p{dstfile}" \\
   "$p{srcfile}"
@@ -812,5 +812,5 @@ if ( -d $ARGV[0] ) {
   filetitlescan($ARGV[0]);
 }
 
-#x '%dvd', \%dvd;
+x '%dvd', \%dvd;
 tuning();
