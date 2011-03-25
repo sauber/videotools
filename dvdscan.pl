@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 
 # Read Title, Chapter, Lang, Resolution Information, etc from DVD
 # XXX TODO
