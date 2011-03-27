@@ -30,3 +30,7 @@ ffmpeg -i /tmp/monsters-05.mpg -vcodec libx264 -ac 2 /tmp/monsters-05.mp4
 
 # Convert loss dump to AVC, slightly higher quality, maybe:
 ffmpeg -i /tmp/monsters-05.mpg -vcodec libx264 -ac 2 -ab 128k -ar 48000 -y -mbd 2 -cmp 3 -precmp 3 -subcmp 3 -trellis 2 -flags +4mv -level 30 -refs 2 -b 1400k -bt 1400k -threads 0 /tmp/monsters-05.mp4
+
+# Convert any video file to PSP 720x480
+# from http://rob.opendot.cl/index.php/useful-stuff/psp-video-guide/
+ffmpeg -i pub-vp6f.flv -ac 2 -ar 48000 -acodec libfaac -ab 128k -r 25 -s 720x480 -vcodec libx264 -vpre slower -vpre main -level 30 -refs 3 -flags2 -bpyramid-wpred -b 768k -maxrate 10M -bufsize 10M -threads 0 -aspect 16:9 -metadata title="TITLE" OUTPUT.mp4
