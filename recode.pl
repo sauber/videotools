@@ -67,7 +67,7 @@ method titleinfo ( Str $title ) {
   my %info;
 
   # Scan the title for information
-  my $cmd = $self->cmd_titleinfo( title=>$title );
+  my $cmd = $self->cmd_titleinfo( $title );
   open SCAN, qq,$cmd 2>/dev/null |,;
     while (<SCAN>) {
       /ID_AID_\d+_LANG=(\w+)/ and push @{$info{audio}}   , $1;
@@ -114,7 +114,7 @@ method cmd_scanmedia {
   return qq,mplayer -identify -frames 1 -vo null -ao null "$input",;
 }
 
-method cmd_titleinfo ( Str :$title? ) {
+method cmd_titleinfo ( Str $title? ) {
   my $input = $self->media->source;
   return qq,mplayer -identify -frames 1 -vo null -ao null "$input",;
 }
@@ -148,12 +148,19 @@ method cmd_scanmedia {
   return qq,mplayer -identify -frames 1 -vo null -ao null -dvd-device "$input" dvd://,;
 }
 
-method cmd_titleinfo ( Str :$title ) {
+method cmd_titleinfo ( Str $titleid ) {
   my $input = $self->media->source;
-  return qq,mplayer -identify -frames 1 -vo null -ao null -dvd-device "$input" dvd://$title,;
+  return qq,mplayer -identify -frames 1 -vo null -ao null -dvd-device "$input" dvd://$titleid,;
 }
 
-method cmd_cropdetect {}
+method cmd_cropdetect ( Str $titleid ) {
+  my $title = $self->media->container->idtitle( $titleid );
+  return sprintf 'mplayer -nosound -vo null -benchmark -vf cropdetect -ss %d -endpos %d -dvd-device "%s" dvd://%d 2>/dev/null',
+    $title->samplestart,
+    $title->samplelength,
+    $self->media->source,
+    $titleid;
+}
 
 # All the titles on a DVD
 #
@@ -203,20 +210,74 @@ method audiolang         { $self->_info->{audiolang}         }
 method subtitle          { $self->_info->{subtitle}          }
 method videoresolution   { $self->_info->{videoresolution}   }
 method displayresolution { $self->_info->{displayresolution} }
-has 'cropline' => ( isa=>'Str', is=>'ro', lazy_build=>1 );
-method _build_cropline {
-  # Start and end
-  my($start,$end) = split '-', $self->sample;
-  $end -= $start; # End is length from start
+has 'cropline' => ( isa=>'Str', is=>'ro', default=>sub{shift->cropdetect} );
+#method _build_cropline {
+#  # Start and end
+#  my($start,$end) = split '-', $self->sample;
+#  $end -= $start; # End is length from start
+#
+#  #my $cmd = sprintf 'mplayer -nosound -vo null -benchmark -vf cropdetect -ss %d -endpos %d -dvd-device "%s" dvd://%d 2>/dev/null',
+#  #  $start, $end, $dvd{src}, $title;
+#  $self->container->cropdetect($self->id);
+#}
 
-  #my $cmd = sprintf 'mplayer -nosound -vo null -benchmark -vf cropdetect -ss %d -endpos %d -dvd-device "%s" dvd://%d 2>/dev/null',
-  #  $start, $end, $dvd{src}, $title;
-  $self->container->cropdetect($self->id);
+method cropdetect {
+  return $self->videoresolution; # XXX: There is deep recursion
+  my $cmd = $self->container->cmd_cropdetect($self->id);
+  warn "*** cropdetect $cmd\n";
+
+  # Look for
+  #   [CROP] Crop area: X: 0..719  Y: 0..477  (-vf crop=720:464:0:8).
+  my $cropline;
+  open CROP, qq,$cmd |,;
+    while(<CROP>){
+      #print;
+      next unless /CROP/;
+      chomp;
+      $cropline = $_;
+    }
+  close CROP;
+
+  if ( $cropline ) {
+    # Cropping detected
+    $cropline =~ /crop=([\d\:]+)/ and return $1;
+  } else {
+    # no cropping detected so use full resolution
+    return $self->videoresolution;
+  }
 }
 
+# For crop detect and for render sample, decide length of sample
+#
+method samplelength {
+  my($start,$end) = split /-/, $self->sample;
+  if ( $end-$start > $self->length ) {
+    # Desired sample longer than video, so choose whole video
+    return $self->length;
+  } else {
+    # Video long enough to use full desired sample length
+    return $end-$start;
+  }
+}
 
+# For crop detect and for render sample, decide startpoint of sample
+#
+method samplestart {
+  my($start,$end) = split /-/, $self->sample;
+  if ( $end-$start > $self->length ) {
+    # Desired sample longer than video, so start from beginning
+    return 0;
+  } elsif ( $end > $self->length ) {
+    # Desired sample end is beyond end of video. Choose middle of video
+    return ( $self->length - ( $end-$start ) ) / 2;
+  } else {
+    # Video long enough to use full desired sample length
+    return $start;
+  }
+}
 
 __PACKAGE__->meta->make_immutable;
+
 
 ########################################################################
 ### BATCH CONVERSIONS TO BE DONE
@@ -312,10 +373,10 @@ __PACKAGE__->meta->make_immutable;
 ### MAIN
 ########################################################################
 
-sub x {
- use Data::Dumper;
- warn Data::Dumper->Dump([$_[1]], ["*** $_[0]"]);
-}
+#sub x {
+# use Data::Dumper;
+# warn Data::Dumper->Dump([$_[1]], ["*** $_[0]"]);
+#}
 
 die "Usage: $0 <mediasource>\n" unless @ARGV;
 my $media = Media->new( source => shift @ARGV );
