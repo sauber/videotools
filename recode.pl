@@ -1,5 +1,9 @@
 #!/usr/bin/env perl
 
+# Convert DVD or single video file input source to 720x480 mpeg4
+# playable on PSP TV out.
+# Soren - Apr 2011
+
 
 
 ########################################################################
@@ -238,9 +242,12 @@ EOF
   return $result;
 }
 
+# Print menu, read user input and process
+#
 method tuning {
   my $done;
   do {
+    $self->datadump;
     my $response = $self->menu;
     for ( $response ) {
       #/^a\s*(.*)/  and cropdetect($1 || $dvd{current}),          next;
@@ -263,6 +270,20 @@ method tuning {
       #/^w/         and writebatch(),                             next;
     }
   } until $done;
+}
+
+# Print input and output data
+#
+method datadump {
+  my $titles = $self->media->container->titles;
+  for my $i ( 0 .. $#$titles ) {
+    my $title = $titles->[$i];
+    printf "Title %s\n", $title->id;
+    print "  Input:\n";
+    printf "    %s: %s\n", $_, $title->{$_} for keys %$title;
+    print "  Output:\n";
+
+  }
 }
 
 __PACKAGE__->meta->make_immutable;
