@@ -43,7 +43,7 @@ __PACKAGE__->meta->make_immutable;
 
 
 ########################################################################
-### VIDEO
+### VIDEO CONTAINER
 ########################################################################
 
 # General Video Stream Methods
@@ -86,6 +86,15 @@ method titleinfo ( Str $title ) {
   return \%info;
 }
 
+# The title with given id
+#
+method idtitle ( Num $id ) {
+  for my $t ( @{$self->titles} ) {
+    #warn sprintf "*** idtitle %s vs. %s\n", $id, $t->id;
+    return $t if $t->id eq $id;
+  }
+  return $self->titles->[0];
+}
 
 
 
@@ -203,9 +212,9 @@ method _build_cropline {
   #my $cmd = sprintf 'mplayer -nosound -vo null -benchmark -vf cropdetect -ss %d -endpos %d -dvd-device "%s" dvd://%d 2>/dev/null',
   #  $start, $end, $dvd{src}, $title;
   $self->container->cropdetect($self->id);
-
-  
 }
+
+
 
 __PACKAGE__->meta->make_immutable;
 
@@ -218,6 +227,11 @@ use Term::Prompt;
 use Moose;
 use MooseX::Method::Signatures;
 
+sub x {
+ use Data::Dumper;
+ warn Data::Dumper->Dump([$_[1]], ["*** $_[0]"]);
+}
+
 has 'media' => ( isa=>'Media', is =>'ro' );
 has 'title' => ( isa=>'Str', is=>'rw', default=>0 );
 
@@ -228,9 +242,9 @@ method menu {
     print <<EOF;
 Video Conversion Options
 ------------------------
-a) Autocrop            g) Folder                r) Resolution/Padding
+a) Autocrop [n]        g) Folder                r) Resolution/Padding
 b) Adjust crop         h) Chapter-by-Chapter    s) Preview start-end
-c) Preview crop        i) Encoding Information  t) Change Title
+c) Preview crop [n]    i) Encoding Information  t) Change Title
 d) Destination Device  l) Language              w) Write batch
 f) File names          m) Menu                  q) Quit
                        p) Preview               u) Select/unselect
@@ -248,9 +262,15 @@ method tuning {
   my $done;
   do {
     $self->datadump;
+    my $container = $self->media->container;
+    my $title = $container->idtitle($self->title);
+    #x 'current title', $title;
     my $response = $self->menu;
     for ( $response ) {
+      /\w\s*(\d+)/ and $title = $container->idtitle($1); # Command local title
+      /^(\d+)/     and $self->title($1),                        next;
       #/^a\s*(.*)/  and cropdetect($1 || $dvd{current}),          next;
+      /^a/         and $title->cropdetect(),                     next;
       #/^b\s*(.+)/  and cropset($dvd{current}, $1),               next;
       #/^c\s*(.*)/  and croppreview($1 || $dvd{current}),         next;
       #/^d/         and print "Not implemented\n";
