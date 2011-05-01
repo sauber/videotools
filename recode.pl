@@ -52,30 +52,36 @@ package Video;
 
 use Moose::Role;
 use MooseX::Method::Signatures;
+use Carp qw(confess);
 
 requires 'titles';
+requires 'titlesource';
 
 # Various command to extract data, preview and render
 #
-method cmd ( Str $action, Ref $title ) {
+method cmd ( Str $action, Ref $title? ) {
   for ( $action ) {
 
-    /(titleinfo|scanmedia)/ and return sprintf
+    /scanmedia/ and return sprintf
       'mplayer -identify -frames 1 -vo null -ao null %s',
-      $self->container->titlesource( $title->id );
+      $self->mediasource();
+
+    /titleinfo/ and return sprintf
+      'mplayer -identify -frames 1 -vo null -ao null %s',
+      $self->titlesource( $title );
 
     /cropdetect/ and return sprintf
       'mplayer -nosound -vo null -benchmark -vf cropdetect -ss %d -endpos %d %s',
-      $self->samplestart,
-      $self->samplelength,
-      $self->container->titlesource( $title->id );
+      $title->samplestart,
+      $title->samplelength,
+      $self->titlesource( $title );
 
     /croppreview/ and return sprintf
       'mplayer -vf %s -ss %d -endpos %d %s',
-      $self->cropline,
-      $self->samplestart,
-      $self->samplelength,
-      $self->container->titlesource( $title->id );
+      $title->cropline,
+      $title->samplestart,
+      $title->samplelength,
+      $self->titlesource( $title );
   }
   die "No $action action not defined";
 }
@@ -93,29 +99,31 @@ sub x {
 
 # Extra attributes from one title
 #
-method titleinfo ( Str $titleid ) {
-  my %info;
+method titleinfo ( Ref $title ) {
+  my $cmd = $self->cmd( 'titleinfo', $title );
+  warn "*** titleinfo $cmd\n";
+
 
   # Scan the title for information
-  #my $cmd = $self->cmd_titleinfo( $title );
-  my $cmd = $self->cmd( 'titleinfo', $self->idtitle($titleid) );
-  warn "*** titleinfo $cmd\n";
-  open SCAN, qq,$cmd |,;
+  my %info;
+  open SCAN, qq,$cmd 2>/dev/null |,;
+  #x 'container titleinfo', $self->titles;
     while (<SCAN>) {
-      /ID_AID_\d+_LANG=(\w+)/ and push @{$info{audio}}   , $1;
-      /ID_SID_\d+_LANG=(\w+)/ and push @{$info{subt}}    , $1;
-      /CHAPTERS: (\S+),/      and        $info{chapters} = $1;
-      /ID_LENGTH=([\d\.]+)/   and        $info{length}   = $1;
+      /ID_AID_\d+_LANG=(\w+)/ and push @{ $info{audiolang} } , $1;
+      /ID_SID_\d+_LANG=(\w+)/ and push @{ $info{subtitle}  } , $1;
+      /CHAPTERS: (\S+),/      and         $info{chapters}    = $1;
+      /ID_LENGTH=([\d\.]+)/   and         $info{length}      = $1;
       /VO: \[null\] (\d+x\d+) => (\d+x\d+)/ and do {
          $info{videoresolution}   = $1;
          $info{displayresolution} = $2;
       };
     }
+  #x 'container titleinfo', $self->titles;
   close SCAN;
-  $info{audio} = [ uniq( @{$info{audio}} ) ] if $info{audio};
-  $info{subt}  = [ uniq( @{$info{subt}}  ) ] if $info{subt};
+  $info{audiolang} = [ uniq( @{$info{audiolang}} ) ] if $info{audiolang};
+  $info{subtitle}  = [ uniq( @{$info{subtitle}}  ) ] if $info{subtitle} ;
 
-  x "$titleid titleinfo", \%info;
+  #x "$title->id titleinfo", \%info;
   return \%info;
 }
 
@@ -123,6 +131,10 @@ method titleinfo ( Str $titleid ) {
 #
 method idtitle ( Num $id ) {
   for my $t ( @{$self->titles} ) {
+    unless ( defined $t ) {
+      x "idtitle has no id to match $id", $self->titles unless defined $t;
+      confess;
+    }
     #warn sprintf "*** idtitle %s vs. %s\n", $id, $t->id;
     return $t if $t->id eq $id;
   }
@@ -146,7 +158,7 @@ method mediasource  {
   '"' . $self->media->source . '"';
 }
 
-method titlesource ( Str $titleid? )  {
+method titlesource ( Ref $title? )  {
   $self->mediasource; 
 }
 
@@ -170,24 +182,27 @@ use Moose;
 use MooseX::Method::Signatures;
 has 'media' => ( isa=>'Media', is =>'ro', required=>1 );
 
-our $scanmedia = 'mplayer -identify -frames 1 -vo null -ao null -dvd-device';
+#our $scanmedia = 'mplayer -identify -frames 1 -vo null -ao null -dvd-device';
 
 method mediasource  {
   my $input = $self->media->source;
   return qq,-dvd-device "$input" dvd://,;
 }
 
-method titlesource ( Str $titleid )  {
-  $self->mediasource . $titleid;
+method titlesource ( Ref $title )  {
+  $self->mediasource . $title->id;
 }
 
 # All the titles on a DVD
 #
 has titles => ( isa=>'ArrayRef[Title]', is=>'ro', lazy_build=>1 );
 method _build_titles {
-  my $input = $self->media->source;
+  #my $input = $self->media->source;
+  my $cmd = $self->cmd( 'scanmedia' );
+  warn "*** scanmedia $cmd\n";
   my %title;
-  open SCAN, qq,$scanmedia "$input" dvd:// 2>/dev/null |,;
+  #open SCAN, qq,$scanmedia "$input" dvd:// 2>/dev/null |,;
+  open SCAN, qq,$cmd 2>/dev/null |,;
     while (<SCAN>) {
       /ID_DVD_TITLE_(\d+)_CHAPTERS=(\d+)/   and $title{$1}{chapters} = $2;
       /ID_DVD_TITLE_(\d+)_LENGTH=([\d\.]+)/ and $title{$1}{length}   = $2;
@@ -214,7 +229,13 @@ package Title;
 ########################################################################
 
 use Moose;
+use Carp qw(confess);
 use MooseX::Method::Signatures;
+
+sub x {
+ use Data::Dumper;
+ warn Data::Dumper->Dump([$_[1]], ["*** $_[0]"]);
+}
 
 has 'id'        => ( isa=>'Int', is =>'ro', required=>1 );
 has 'container' => ( isa=>'Video', is =>'ro', required=>1 );
@@ -225,8 +246,15 @@ has 'sample' => ( isa=>'Str', is=>'rw', default=>'25-75' );
 has 'selected'  => ( isa=>'Bool', is =>'rw', default=>method{1 if $self->length and $self->length > 120} );
 
 has _info => ( isa=>'HashRef', is=>'ro', lazy_build=>1 );
+#method _build__info { $self->container->titleinfo($self) }
+method _build__info {
+  #x '_info containter titles', $self->container->titles;
+  my $info = $self->container->titleinfo($self);
+  #x '_info', $info;
+  #x '_info containter titles', $self->container->titles;
+  return $info;
+ }
 
-method _build__info { $self->container->titleinfo($self->id) }
 method audiolang         { $self->_info->{audiolang}         }
 method subtitle          { $self->_info->{subtitle}          }
 method videoresolution   { $self->_info->{videoresolution}   }
@@ -239,9 +267,7 @@ has 'cropline' => ( isa=>'Str', is=>'rw', lazy_build=>1 );
 method _build_cropline { $self->cropdetect }
 
 
-
 method cropdetect {
-  #return $self->videoresolution; # XXX: There is deep recursion
   my $cmd = $self->container->cmd( 'cropdetect', $self );
   
   warn "*** cropdetect $cmd\n";
@@ -249,7 +275,7 @@ method cropdetect {
   # Look for
   #   [CROP] Crop area: X: 0..719  Y: 0..477  (-vf crop=720:464:0:8).
   my $cropline;
-  open CROP, qq,$cmd |,;
+  open CROP, qq,$cmd 2>/dev/null |,;
     while(<CROP>){
       #print;
       next unless /CROP/;
@@ -297,6 +323,30 @@ method samplestart {
   }
 }
 
+method humanduration {
+  my $sec = $self->length;
+  sprintf "%01d:%02d:%02d", int($sec/3600), int(($sec/60)%60), int($sec%60);
+}
+
+# A short description of title
+#
+method titlesummary {
+  my $summary = sprintf "%7s,%2d,%s,%s,%s,%s",
+    $self->humanduration,
+    $self->chapters,
+    $self->videoresolution,
+    $self->displayresolution,
+    join('-', $self->audiolang ? @{$self->audiolang} : () ),
+    join('-', $self->subtitle  ? @{$self->subtitle}  : () ),
+    qw(4 5 6);
+  #x 'titlesummary', $self;
+  return $summary;
+}
+
+sub DEMOLISH {
+  confess;
+}
+
 __PACKAGE__->meta->make_immutable;
 
 
@@ -315,12 +365,68 @@ sub x {
 }
 
 has 'media'   => ( isa=>'Media', is =>'ro' );
-has 'titleid' => ( isa=>'Str', is=>'rw', default=>0 );
 
+# Current title. Defaults to longest title.
+has 'title' => ( isa=>'Title', is=>'rw', lazy_build=>1 );
+method _build_title {
+  my $longest;
+  for my $obj ( @{ $self->media->container->titles } ) {
+    $longest = $obj, next unless $longest;
+    $longest = $obj if
+      $obj->length and $longest->length and
+      $obj->length  >  $longest->length;
+  }
+  return $longest;
+}
+
+# Print all titles, confirm selection of which titles to include in batch
+#
+method selecttitles {
+  my $titles = $self->media->container->titles;
+  my($default,@result);
+  do {
+    $default = join ',', map $_->id, grep $_->selected, @$titles;
+    #x "selecttitles", $titles;
+    #my @items = map {
+    #  ( $_->selected ? '(*) ' : '    ' ) .
+    #  #'str'
+    #   $_->titlesummary
+    #} @$titles;
+    my @items;
+    for my $t ( @$titles ) {
+      push @items,
+        ( $t->selected ? '(*) ' : '    ' ) .
+        $t->titlesummary
+    }
+    #x "selecttitles", $titles;
+    
+    @result = prompt(
+      'm',
+      {
+         prompt => 'Select Titles',
+         title  => 'Track,Length,#Chapters,Video,Display,Audio,Subtitle',
+         items  => \@items,
+         return_base                => 1,
+         accept_multiple_selections => 1,
+         accept_empty_selection     => 1,
+      },
+      '1 2 3 ...',
+      $default,
+    );
+    # Mark selected according to result
+    #x "selecttitles", $titles;
+    $_->selected(0) for @$titles;
+    $_->selected(1) for map $self->media->container->idtitle($_), @result;
+  } until $default eq join ',', @result;
+  return $self;
+}
+
+# Print a menu of available tuning options
+# #
 method menu {
   my $result;
   #my $titleid = $self->media->container->titles->[$self->title]->id;
-  my $titleid = $self->titleid;
+  my $titleid = $self->title->id;
   do {
     print <<EOF;
 Video Conversion Options
@@ -346,7 +452,7 @@ method tuning {
   do {
     $self->datadump;
     my $container = $self->media->container;
-    my $title = $container->idtitle($self->titleid);
+    my $title = $self->title;
     #x 'current title', $title;
     my $response = $self->menu;
     for ( $response ) {
@@ -373,6 +479,7 @@ method tuning {
       #/^w/         and writebatch(),                             next;
     }
   } until $done;
+  return $self;
 }
 
 # Print input and output data
@@ -387,6 +494,7 @@ method datadump {
     print "  Output:\n";
 
   }
+  return $self;
 }
 
 __PACKAGE__->meta->make_immutable;
@@ -404,4 +512,4 @@ __PACKAGE__->meta->make_immutable;
 die "Usage: $0 <mediasource>\n" unless @ARGV;
 my $media = Media->new( source => shift @ARGV );
 #x 'media', $media->container->titles->[0]->_info;
-Batch->new( media=>$media )->tuning;
+Batch->new( media=>$media )->selecttitles->tuning;
