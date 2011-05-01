@@ -6,11 +6,12 @@
 
 
 
+
+package Media;
 ########################################################################
 ### MEDIA
 ########################################################################
 
-package Media;
 use Moose;
 use Moose::Util::TypeConstraints;
 use MooseX::Method::Signatures;
@@ -42,33 +43,64 @@ sub x {
 __PACKAGE__->meta->make_immutable;
 
 
+# General Video Stream Methods
+
+package Video;
 ########################################################################
 ### VIDEO CONTAINER
 ########################################################################
 
-# General Video Stream Methods
-
-package Video;
 use Moose::Role;
 use MooseX::Method::Signatures;
 
-requires 'cmd_scanmedia';
-requires 'cmd_titleinfo';
-requires 'cmd_cropdetect';
 requires 'titles';
+
+# Various command to extract data, preview and render
+#
+method cmd ( Str $action, Ref $title ) {
+  for ( $action ) {
+
+    /(titleinfo|scanmedia)/ and return sprintf
+      'mplayer -identify -frames 1 -vo null -ao null %s',
+      $self->container->titlesource( $title->id );
+
+    /cropdetect/ and return sprintf
+      'mplayer -nosound -vo null -benchmark -vf cropdetect -ss %d -endpos %d %s',
+      $self->samplestart,
+      $self->samplelength,
+      $self->container->titlesource( $title->id );
+
+    /croppreview/ and return sprintf
+      'mplayer -vf %s -ss %d -endpos %d %s',
+      $self->cropline,
+      $self->samplestart,
+      $self->samplelength,
+      $self->container->titlesource( $title->id );
+  }
+  die "No $action action not defined";
+}
+
 
 # Uniq items in an array
 #
 sub uniq { my %U; grep { !$U{$_}++ } @_ }
 
+# Debug
+sub x {
+ use Data::Dumper;
+ warn Data::Dumper->Dump([$_[1]], ["*** $_[0]"]);
+}
+
 # Extra attributes from one title
 #
-method titleinfo ( Str $title ) {
+method titleinfo ( Str $titleid ) {
   my %info;
 
   # Scan the title for information
-  my $cmd = $self->cmd_titleinfo( $title );
-  open SCAN, qq,$cmd 2>/dev/null |,;
+  #my $cmd = $self->cmd_titleinfo( $title );
+  my $cmd = $self->cmd( 'titleinfo', $self->idtitle($titleid) );
+  warn "*** titleinfo $cmd\n";
+  open SCAN, qq,$cmd |,;
     while (<SCAN>) {
       /ID_AID_\d+_LANG=(\w+)/ and push @{$info{audio}}   , $1;
       /ID_SID_\d+_LANG=(\w+)/ and push @{$info{subt}}    , $1;
@@ -83,6 +115,7 @@ method titleinfo ( Str $title ) {
   $info{audio} = [ uniq( @{$info{audio}} ) ] if $info{audio};
   $info{subt}  = [ uniq( @{$info{subt}}  ) ] if $info{subt};
 
+  x "$titleid titleinfo", \%info;
   return \%info;
 }
 
@@ -98,28 +131,24 @@ method idtitle ( Num $id ) {
 
 
 
+package File;
 ########################################################################
 ### FILE
 ########################################################################
 
 # Methods that are specific to handle a Single Video File
 
-package File;
 use Moose;
 use MooseX::Method::Signatures;
 has 'media' => ( isa=>'Media', is =>'ro' );
 
-method cmd_scanmedia {
-  my $input = $self->media->source;
-  return qq,mplayer -identify -frames 1 -vo null -ao null "$input",;
+method mediasource  {
+  '"' . $self->media->source . '"';
 }
 
-method cmd_titleinfo ( Str $title? ) {
-  my $input = $self->media->source;
-  return qq,mplayer -identify -frames 1 -vo null -ao null "$input",;
+method titlesource ( Str $titleid? )  {
+  $self->mediasource; 
 }
-
-method cmd_cropdetect {}
 
 # A File only has one title
 has titles => ( isa=>'ArrayRef[Title]', is=>'ro', lazy_build=>1 );
@@ -130,36 +159,26 @@ with 'Video';
 __PACKAGE__->meta->make_immutable;
 
 
+package DVD;
 ########################################################################
 ### DVD
 ########################################################################
 
 # Methods that are specific to handling a DVD source with 1 or more titles
 
-package DVD;
 use Moose;
 use MooseX::Method::Signatures;
 has 'media' => ( isa=>'Media', is =>'ro', required=>1 );
 
 our $scanmedia = 'mplayer -identify -frames 1 -vo null -ao null -dvd-device';
 
-method cmd_scanmedia {
+method mediasource  {
   my $input = $self->media->source;
-  return qq,mplayer -identify -frames 1 -vo null -ao null -dvd-device "$input" dvd://,;
+  return qq,-dvd-device "$input" dvd://,;
 }
 
-method cmd_titleinfo ( Str $titleid ) {
-  my $input = $self->media->source;
-  return qq,mplayer -identify -frames 1 -vo null -ao null -dvd-device "$input" dvd://$titleid,;
-}
-
-method cmd_cropdetect ( Str $titleid ) {
-  my $title = $self->media->container->idtitle( $titleid );
-  return sprintf 'mplayer -nosound -vo null -benchmark -vf cropdetect -ss %d -endpos %d -dvd-device "%s" dvd://%d 2>/dev/null',
-    $title->samplestart,
-    $title->samplelength,
-    $self->media->source,
-    $titleid;
+method titlesource ( Str $titleid )  {
+  $self->mediasource . $titleid;
 }
 
 # All the titles on a DVD
@@ -189,11 +208,11 @@ with 'Video';
 __PACKAGE__->meta->make_immutable;
 
 
+package Title;
 ########################################################################
 ### TITLE
 ########################################################################
 
-package Title;
 use Moose;
 use MooseX::Method::Signatures;
 
@@ -201,29 +220,30 @@ has 'id'        => ( isa=>'Int', is =>'ro', required=>1 );
 has 'container' => ( isa=>'Video', is =>'ro', required=>1 );
 has 'media'     => ( isa=>'Media', is =>'ro' );
 has 'chapters'  => ( isa=>'Int', is =>'ro' );
-has 'length'    => ( isa=>'Num', is =>'ro' );
-has 'selected'  => ( isa=>'Bool', is =>'rw', default=>method{1 if $self->length and $self->length > 120} );
 has 'sample' => ( isa=>'Str', is=>'rw', default=>'25-75' );
+
+has 'selected'  => ( isa=>'Bool', is =>'rw', default=>method{1 if $self->length and $self->length > 120} );
+
 has _info => ( isa=>'HashRef', is=>'ro', lazy_build=>1 );
+
 method _build__info { $self->container->titleinfo($self->id) }
 method audiolang         { $self->_info->{audiolang}         }
 method subtitle          { $self->_info->{subtitle}          }
 method videoresolution   { $self->_info->{videoresolution}   }
 method displayresolution { $self->_info->{displayresolution} }
-has 'cropline' => ( isa=>'Str', is=>'ro', default=>sub{shift->cropdetect} );
-#method _build_cropline {
-#  # Start and end
-#  my($start,$end) = split '-', $self->sample;
-#  $end -= $start; # End is length from start
-#
-#  #my $cmd = sprintf 'mplayer -nosound -vo null -benchmark -vf cropdetect -ss %d -endpos %d -dvd-device "%s" dvd://%d 2>/dev/null',
-#  #  $start, $end, $dvd{src}, $title;
-#  $self->container->cropdetect($self->id);
-#}
+
+has 'length'    => ( isa=>'Num', is =>'ro', lazy_build=>1 );
+method _build_length { $self->_info->{length} }
+
+has 'cropline' => ( isa=>'Str', is=>'rw', lazy_build=>1 );
+method _build_cropline { $self->cropdetect }
+
+
 
 method cropdetect {
-  return $self->videoresolution; # XXX: There is deep recursion
-  my $cmd = $self->container->cmd_cropdetect($self->id);
+  #return $self->videoresolution; # XXX: There is deep recursion
+  my $cmd = $self->container->cmd( 'cropdetect', $self );
+  
   warn "*** cropdetect $cmd\n";
 
   # Look for
@@ -240,6 +260,7 @@ method cropdetect {
 
   if ( $cropline ) {
     # Cropping detected
+    warn "*** cropline $cropline\n";
     $cropline =~ /crop=([\d\:]+)/ and return $1;
   } else {
     # no cropping detected so use full resolution
@@ -279,11 +300,11 @@ method samplestart {
 __PACKAGE__->meta->make_immutable;
 
 
+package Batch;
 ########################################################################
 ### BATCH CONVERSIONS TO BE DONE
 ########################################################################
 
-package Batch;
 use Term::Prompt;
 use Moose;
 use MooseX::Method::Signatures;
@@ -293,12 +314,13 @@ sub x {
  warn Data::Dumper->Dump([$_[1]], ["*** $_[0]"]);
 }
 
-has 'media' => ( isa=>'Media', is =>'ro' );
-has 'title' => ( isa=>'Str', is=>'rw', default=>0 );
+has 'media'   => ( isa=>'Media', is =>'ro' );
+has 'titleid' => ( isa=>'Str', is=>'rw', default=>0 );
 
 method menu {
   my $result;
-  my $titleid = $self->media->container->titles->[$self->title]->id;
+  #my $titleid = $self->media->container->titles->[$self->title]->id;
+  my $titleid = $self->titleid;
   do {
     print <<EOF;
 Video Conversion Options
@@ -324,14 +346,14 @@ method tuning {
   do {
     $self->datadump;
     my $container = $self->media->container;
-    my $title = $container->idtitle($self->title);
+    my $title = $container->idtitle($self->titleid);
     #x 'current title', $title;
     my $response = $self->menu;
     for ( $response ) {
       /\w\s*(\d+)/ and $title = $container->idtitle($1); # Command local title
-      /^(\d+)/     and $self->title($1),                        next;
+      /^(\d+)/     and $self->titleid($1),                        next;
       #/^a\s*(.*)/  and cropdetect($1 || $dvd{current}),          next;
-      /^a/         and $title->cropdetect(),                     next;
+      /^a/         and $title->cropline(),                     next;
       #/^b\s*(.+)/  and cropset($dvd{current}, $1),               next;
       #/^c\s*(.*)/  and croppreview($1 || $dvd{current}),         next;
       #/^d/         and print "Not implemented\n";
@@ -361,13 +383,14 @@ method datadump {
     my $title = $titles->[$i];
     printf "Title %s\n", $title->id;
     print "  Input:\n";
-    printf "    %s: %s\n", $_, $title->{$_} for keys %$title;
+    printf "    %s: %s\n", $_, $title->{$_} for grep defined $title->{$_}, keys %$title;
     print "  Output:\n";
 
   }
 }
 
 __PACKAGE__->meta->make_immutable;
+
 
 ########################################################################
 ### MAIN
