@@ -164,7 +164,7 @@ method titlesource ( Ref $title? )  {
 
 # A File only has one title
 has titles => ( isa=>'ArrayRef[Title]', is=>'ro', lazy_build=>1 );
-method _build_titles {[ Title->new( id=>0, container=>$self ) ]}
+method _build_titles {[ Title->new( id=>1, container=>$self ) ]}
 
 with 'Video';
 
@@ -240,7 +240,7 @@ sub x {
 has 'id'        => ( isa=>'Int', is =>'ro', required=>1 );
 has 'container' => ( isa=>'Video', is =>'ro', required=>1 );
 has 'media'     => ( isa=>'Media', is =>'ro' );
-has 'chapters'  => ( isa=>'Int', is =>'ro' );
+has 'chapters'  => ( isa=>'Int', is =>'ro', default=>1 );
 has 'sample' => ( isa=>'Str', is=>'rw', default=>'25-75' );
 
 has 'selected'  => ( isa=>'Bool', is =>'rw', default=>method{1 if $self->length and $self->length > 120} );
