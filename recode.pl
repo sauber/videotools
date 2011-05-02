@@ -300,15 +300,13 @@ sub langcompare {
   # Choose first language
   return $lang[0] if $pref eq 'orig';
 
-  if ( $pref eq uc $lang[0] ) {
-    # Preferred language must be first
-    return $lang[0];
-  } else {
-    # Preferred language must be among the choices
-    return $pref if inarray($pref,@lang);
-  }
+  # Preferred language is first
+  return $lang[0] if $pref eq uc $lang[0];
 
-  # None of our choices are available. And we are ok with no language then.
+  # Preferred language is among the choices
+  return $pref if inarray($pref,@lang);
+
+  # No language is ok
   return '' if $pref eq 'none';
 
   # Nothing matches
@@ -328,15 +326,65 @@ method _build_selectedsubtitle { (split /:/, $self->langpreferred)[1] || '' }
 # Select language according to preferences
 # Uppercase for primary languages, lowercase for secondary
 #
+# DA or JA is main audio, use if suitable subtitles
+#   DA audio, ja subt
+#   JA audio, da subt
+#   DA audio, en subt
+#   JA audio, en subt
+#
+# DA or JA is available audio, try suitable subtitles
+#   da audio, ja subt
+#   ja audio, da subt
+#   da audio, en subt
+#   ja audio, en subt
+#   da audio, none subt
+#   ja audio, none subt
+#
+# EN is available audio, try JA subtitle
+#   en audio, ja subt
+#   en audio, none subt
+#
+# No preferred audio available, try subtitles
+#   ORIG audio, en subt
+#   ORIG audio, ja subt
+#   ORIG audio, da subt
+#   ORIG audio, ORIG subt
+#   ORIG audio, none subt
+
+# No audio is available, try subtitles
+#   none audio, ORIG subt
+#   none audio, none subt
+#
+sub language_preferences {
+  qw(
+    DA:jp
+    JA:da
+    DA:en
+    JA:en
+
+    da:ja
+    jA:da
+    dA:en
+    jA:en
+    dA:none
+    jA:none
+
+    en:ja
+    en:none
+
+    orig:en
+    orig:ja
+    orig:da
+    orig:orig
+    orig:none
+
+    none:orig
+    none:none
+  );
+}
+
 has langpreferred => ( isa=>'Str', is=>'ro', lazy_build=>1 );
 method _build_langpreferred {
-  # If primary audio is Danish, then prefer jp subtitle etc.
-  my @pref = qw(
-    DA:jp DA:en DA:none JA:en JA:da EN:ja EN:none JA:none
-    da:jp da:en da:none ja:en ja:da en:ja en:none ja:none
-    orig:orig orig:none
-  );
-
   # Available languages in input
   my @audio    = @{ $self->audiolang };
   my @subtitle = @{ $self->subtitle  };
@@ -346,7 +394,7 @@ method _build_langpreferred {
 
   # Run through preferences in order, and see if any can be honered
   my $language = '';
-  for my $p ( @pref ) {
+  for my $p ( language_preferences ) {
     warn "*** langpreferred test if $p match @audio:@subtitle\n";
     my($prefa,$prefs) = split /:/, $p;
     my $chosenlang = langcompare($prefa,@audio);
