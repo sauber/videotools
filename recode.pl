@@ -76,12 +76,26 @@ method cmd ( Str $action, Ref $title? ) {
       $title->samplelength,
       $self->titlesource( $title );
 
-    /croppreview/ and return sprintf
-      'mplayer -vf %s -ss %d -endpos %d %s',
-      $title->cropline,
-      $title->samplestart,
-      $title->samplelength,
-      $self->titlesource( $title );
+    /preview/ and do {
+      my @opt;
+      push @opt, sprintf("-ss %s", $title->samplestart)
+        if $title->samplestart > 0;
+      push @opt, sprintf("-endpos %s", $title->samplelength)
+        if $title->samplelength < $title->length;
+      push @opt, sprintf("-vf rectangle=%s", $title->cropline)
+        if $title->cropline ne $title->videoresolution;
+      push @opt, sprintf("-aid %d", $title->selectedaudio)
+        if $title->selectedaudio =~ /^\d+$/;
+      push @opt, sprintf("-alang %s", $title->selectedaudio)
+        if $title->selectedaudio =~ /^\D+$/;
+      push @opt, sprintf("-sid %d", $title->selectedsubtitle)
+        if $title->selectedsubtitle =~ /^\d+$/;
+      push @opt, sprintf("-slang %s", $title->selectedsubtitle)
+        if $title->selectedsubtitle =~ /^\D+$/;
+
+      return sprintf
+        'mplayer %s %s', join(' ', @opt), $self->titlesource( $title );
+    };
   }
   die "No $action action not defined";
 }
@@ -255,17 +269,126 @@ method _build__info {
   return $info;
  }
 
-method audiolang         { $self->_info->{audiolang}         }
-method subtitle          { $self->_info->{subtitle}          }
 method videoresolution   { $self->_info->{videoresolution}   }
 method displayresolution { $self->_info->{displayresolution} }
+
+# List of an element is in an array
+#
+sub inarray {
+  my($elem,@list) = @_;
+
+  for my $i ( @list ) {
+    return 1 if $i eq $elem;
+  }
+  return undef;
+}
+
+# Compare two languages
+#  - DA, first langauage is da
+#  - da, any language is da
+#  - none, empty choices
+#  - orig, the first language
+sub langcompare {
+  my($pref,@lang) = @_;
+
+  # There are no languages, and that's what we want
+  return '' if $pref eq 'none' and @lang == 0;
+
+  # We do want languages, but there are none
+  return undef if @lang == 0;
+
+  # Choose first language
+  return $lang[0] if $pref eq 'orig';
+
+  if ( $pref eq uc $lang[0] ) {
+    # Preferred language must be first
+    return $lang[0];
+  } else {
+    # Preferred language must be among the choices
+    return $pref if inarray($pref,@lang);
+  }
+
+  # None of our choices are available. And we are ok with no language then.
+  return '' if $pref eq 'none';
+
+  # Nothing matches
+  return undef;
+}
+
+# Available languages from title
+method audiolang         { $self->_info->{audiolang} || [] }
+method subtitle          { $self->_info->{subtitle}  || [] }
+
+# Chosen output languages
+has selectedaudio    => ( isa=>'Str', is=>'rw', lazy_build=>1 );
+method _build_selectedaudio    { (split /:/, $self->langpreferred)[0] || '' }
+has selectedsubtitle => ( isa=>'Str', is=>'rw', lazy_build=>1 );
+method _build_selectedsubtitle { (split /:/, $self->langpreferred)[1] || '' }
+
+# Select language according to preferences
+# Uppercase for primary languages, lowercase for secondary
+#
+has langpreferred => ( isa=>'Str', is=>'ro', lazy_build=>1 );
+method _build_langpreferred {
+  # If primary audio is Danish, then prefer jp subtitle etc.
+  my @pref = qw(
+    DA:jp DA:en DA:none JA:en JA:da EN:ja EN:none JA:none
+    da:jp da:en da:none ja:en ja:da en:ja en:none ja:none
+    orig:orig orig:none
+  );
+
+  # Available languages in input
+  my @audio    = @{ $self->audiolang };
+  my @subtitle = @{ $self->subtitle  };
+
+  my $primaudio = uc $audio[0]    if $audio[0];
+  my $primsubt  = uc $subtitle[0] if $subtitle[0];
+
+  # Run through preferences in order, and see if any can be honered
+  my $language = '';
+  for my $p ( @pref ) {
+    warn "*** langpreferred test if $p match @audio:@subtitle\n";
+    my($prefa,$prefs) = split /:/, $p;
+    my $chosenlang = langcompare($prefa,@audio);
+    next unless defined $chosenlang;
+    my $chosensubt = langcompare($prefs,@subtitle);
+    next unless defined $chosensubt;
+    #last if $choice;
+    #$language = lc $p;
+    $language = "$chosenlang:$chosensubt";
+    warn "*** langpreferred is $language\n";
+    last;
+  }
+
+  warn sprintf "*** Language Auto Select: %s from (@audio:@subtitle)\n",
+    ( $language || '(undef)' );
+  return $language;
+}
+
+# User defined output languages
+method langset ( Str $lang ) {
+  warn "*** Title langset $lang\n";
+  my @audio    = @{ $self->audiolang };
+  my @subtitle = @{ $self->subtitle  };
+  warn "*** Language Auto Select: $lang from (@audio:@subtitle)\n";
+
+  my($audio,$subtitle) = split /:/, $lang;
+  $self->selectedaudio(    $audio    );
+  $self->selectedsubtitle( $subtitle );
+}
 
 has 'length'    => ( isa=>'Num', is =>'ro', lazy_build=>1 );
 method _build_length { $self->_info->{length} }
 
 has 'cropline' => ( isa=>'Str', is=>'rw', lazy_build=>1 );
-method _build_cropline { $self->cropdetect }
+method _build_cropline { $self->displayresolution }
 
+
+method preview {
+  my $cmd = $self->container->cmd( 'preview', $self );
+  warn "*** title preview $cmd\n";
+  qx,$cmd,;
+}
 
 method cropdetect {
   my $cmd = $self->container->cmd( 'cropdetect', $self );
@@ -343,6 +466,7 @@ method titlesummary {
   return $summary;
 }
 
+
 sub DEMOLISH {
   confess;
 }
@@ -356,6 +480,7 @@ package Batch;
 ########################################################################
 
 use Term::Prompt;
+use feature "switch";
 use Moose;
 use MooseX::Method::Signatures;
 
@@ -431,12 +556,12 @@ method menu {
     print <<EOF;
 Video Conversion Options
 ------------------------
-a) Autocrop [n]        g) Folder                r) Resolution/Padding
-b) Adjust crop         h) Chapter-by-Chapter    s) Preview start-end
-c) Preview crop [n]    i) Encoding Information  t) Change Title
-d) Destination Device  l) Language              w) Write batch
-f) File names          m) Menu                  q) Quit
-                       p) Preview               u) Select/unselect
+a) Autocrop [n]           g) Folder                r) Resolution/Padding
+b) Adjust crop [w:h:x:y]  h) Chapter-by-Chapter    s) Preview start-end
+c) Cancel crop [n]        i) Encoding Information  t) Change Title
+                          l) Language [a:s]        w) Write batch
+f) File names             m) Menu                  q) Quit
+                          p) Preview [n]           u) Select/unselect
 Current Title: $titleid
 EOF
 
@@ -450,17 +575,34 @@ EOF
 method tuning {
   my $done;
   do {
-    $self->datadump;
+    #$self->datadump;
     my $container = $self->media->container;
     my $title = $self->title;
     #x 'current title', $title;
+
+    # Read command and arg
     my $response = $self->menu;
-    for ( $response ) {
-      /\w\s*(\d+)/ and $title = $container->idtitle($1); # Command local title
-      /^(\d+)/     and $self->titleid($1),                        next;
-      #/^a\s*(.*)/  and cropdetect($1 || $dvd{current}),          next;
-      /^a/         and $title->cropline(),                     next;
-      #/^b\s*(.+)/  and cropset($dvd{current}, $1),               next;
+    my $command = ''; my $arg;
+    $response =~ /^(\w)\s*(.*?)s*$/ and do { $command = $1; $arg = $2 };
+
+    # Command runs on a specific title instead of current title
+    $title = $container->idtitle($arg) if $arg and $arg =~ /^\d+$/;
+
+    given ( $command ) {
+      # Select Title, Info, Preview, Quit
+      when ( /^\d$/ ) { $title = $self->titleid($command) }
+      when ( 'i'    ) { $self->datadump }
+      when ( 'p'    ) { $title->preview }
+      when ( 'q'    ) { $done = 1 }
+
+      # Cropping
+      when ( 'a' ) { $title->cropline($title->cropdetect)      }
+      when ( 'b' ) { $title->cropline($arg)                    }
+      when ( 'c' ) { $title->cropline($title->videoresolution) }
+
+      # Language
+      when ( 'l' ) { $title->langset($arg) }
+
       #/^c\s*(.*)/  and croppreview($1 || $dvd{current}),         next;
       #/^d/         and print "Not implemented\n";
       #/^f\s+(.*)/  and $dvd{title}{$dvd{current}}{file} = $1,    next;
@@ -469,8 +611,8 @@ method tuning {
       #/^i\s*(\d*)/ and encodesummary($1 || $dvd{current}),       next;
       #/^l\s+(.*)/  and langset($dvd{current}, $1),               next;
       #/^m/         and                                           next;
-      #/^p/         and $dvd{title}{preview} = $1,                next;
-      /^q/         and $done = 1,                                next;
+      #/^p/         and $title->preview, next;
+      #/^q/         and $done = 1,                                next;
       #/^r/         and print "Not implemented\n";
       #/^s+(.*)/    and $dvd{title}{$dvd{current}}{sample} = $1,  next;
       #/^t\s+(\d+)/ and $dvd{current} = $1,                       next;
