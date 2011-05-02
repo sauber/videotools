@@ -1,0 +1,25 @@
+#!/bin/sh -x
+
+# Simplest possible PSP encoder
+# Soren, May 2011
+
+# Usage examples:
+#   pspencode input.mpg output.mp4
+#   pspencode "-dvd-device Pingviner.iso dvd://10" pingviner-10.mp4
+#   pspencode "-dvd-device Pingviner.iso dvd://10 -alang da -slang jp" out.mp4
+
+mencoder -v $1 \
+  -oac pcm -af volnorm \
+  -ovc lavc -lavcopts vcodec=ffvhuff \
+  -o $2.tmp
+
+ffmpeg -i $2.tmp \
+  -ac 2 \
+  -vcodec libx264 \
+  -vpre normal \
+  -vpre main \
+  -level 30 \
+  -b 1400k \
+  -y $2
+
+rm $2.tmp

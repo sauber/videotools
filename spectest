@@ -1,0 +1,44 @@
+#!/bin/sh -x
+
+# Simplest possible PSP encoder
+# Soren, May 2011
+
+# Usage examples:
+#   pspencode input.mpg output.mp4
+#   pspencode "-dvd-device Pingviner.iso dvd://10" pingviner-10.mp4
+#   pspencode "-dvd-device Pingviner.iso dvd://10 -alang da -slang jp" out.mp4
+
+# Test rates
+# Tested limits
+#  -ar 24000, 32000, 44100, 48000
+#  -r 15 .. 100
+#  -s 720x480 720x576
+
+# http://en.wikipedia.org/wiki/H.264/MPEG-4_AVC Specifies for AVC Level 3.0
+
+# Examples for high resolution @ frame rate (max stored frames)
+# 352×480@61.4 (12)
+# 352×576@51.1 (10)
+# 720×480@30.0 (6)
+# 720×576@25.0 (5)
+
+for spec in 720x480 704x480 352x480 352x240 720x576 704x576 352x576 352x288 ; do
+
+#mencoder -v $1 \
+#  -oac pcm -af volnorm \
+#  -ovc lavc -lavcopts vcodec=ffvhuff \
+#  -o $2.tmp
+
+ffmpeg -i $1 \
+  -ac 2 \
+  -vcodec libx264 \
+  -s $spec \
+  -vpre normal \
+  -vpre main \
+  -level 30 \
+  -b 1400k \
+  -y $spec-$2
+
+#rm $2.tmp
+
+done

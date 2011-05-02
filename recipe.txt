@@ -37,3 +37,24 @@ ffmpeg -i pub-vp6f.flv -ac 2 -ar 48000 -acodec libfaac -ab 128k -r 25 -s 720x480
 
 # Extract vob file of DVD title 1
 mplayer dvd://1 -dvd-device TestDVD.iso -dumpstream -dumpfile TestDVD-1.vob
+
+# Minimal options for DVD Rip to PSP
+# Rip with mplayer, overlay subtitle, store in lossless format
+# Encode with ffmpeg in AVC level 3.0
+mencoder -v -dvd-device Pingviner.iso dvd://10 \
+  -ss 45 -endpos 15 \
+  -alang da \
+  -slang en \
+  -oac pcm -af volnorm \
+  -ovc lavc -lavcopts vcodec=ffvhuff \
+  -o output.tmp
+ffmpeg -i output.tmp \
+  -ac 2 \
+  -vcodec libx264 \
+  -vpre normal \
+  -vpre main \
+  -level 30 \
+  -b 1400k \
+  -y output.mp4
+rm output.tmp
+
