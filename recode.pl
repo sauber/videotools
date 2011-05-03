@@ -6,6 +6,38 @@
 
 
 
+package Area;
+########################################################################
+### AREA
+########################################################################
+
+use Moose;
+use MooseX::Method::Signatures;
+
+# Width, height dimensions
+has w => ( isa=>'Num', is=>'ro', default=>0 );
+has h => ( isa=>'Num', is=>'ro', default=>0 );
+has pixelaspect => ( isa=>'Num', is=>'rw', default=>1 );
+
+# x,y offset
+has x => ( isa=>'Num', is=>'ro' );
+has y => ( isa=>'Num', is=>'ro' );
+
+# Dimension aspect
+#
+method aspect {
+  return 1 unless $self->h() > 0 and $self->w() > 0;
+  return $self->w() / $self-h() * $self->pixelaspect;
+}
+
+# Render string: WxH
+# Render string: W:H
+#
+method wxh { sprintf "%dx%d", $self->w, $self->h }
+method wch { sprintf "%d:%d", $self->w, $self->h }
+
+__PACKAGE__->meta->make_immutable;
+
 
 package Media;
 ########################################################################
@@ -43,12 +75,11 @@ sub x {
 __PACKAGE__->meta->make_immutable;
 
 
-# General Video Stream Methods
-
 package Video;
 ########################################################################
 ### VIDEO CONTAINER
 ########################################################################
+# General Video Stream Methods
 
 use Moose::Role;
 use MooseX::Method::Signatures;
@@ -123,13 +154,16 @@ method titleinfo ( Ref $title ) {
   open SCAN, qq,$cmd 2>/dev/null |,;
   #x 'container titleinfo', $self->titles;
     while (<SCAN>) {
-      /ID_AID_\d+_LANG=(\w+)/ and push @{ $info{audiolang} } , $1;
-      /ID_SID_\d+_LANG=(\w+)/ and push @{ $info{subtitle}  } , $1;
-      /CHAPTERS: (\S+),/      and         $info{chapters}    = $1;
-      /ID_LENGTH=([\d\.]+)/   and         $info{length}      = $1;
-      /VO: \[null\] (\d+x\d+) => (\d+x\d+)/ and do {
-         $info{videoresolution}   = $1;
-         $info{displayresolution} = $2;
+      /ID_AID_\d+_LANG=(\w+)/  and push @{ $info{audiolang} } , $1;
+      /ID_SID_\d+_LANG=(\w+)/  and push @{ $info{subtitle}  } , $1;
+      /CHAPTERS: (\S+),/       and         $info{chapters}    = $1;
+      /ID_LENGTH=([\d\.]+)/    and         $info{length}      = $1;
+      /ID_VIDEO_FPS=([\d\.]+)/ and         $info{fps}         = $1;
+      /VO: \[null\] (\d+)x(\d+) => (\d+)x(\d+)/ and do {
+         #$info{videoresolution}   = $1;
+         #$info{displayresolution} = $2;
+         $info{videoresolution}   = Area->new( w=>$1, h=>$2 );
+         $info{displayresolution} = Area->new( w=>$3, h=>$4 );
       };
     }
   #x 'container titleinfo', $self->titles;
@@ -154,7 +188,6 @@ method idtitle ( Num $id ) {
   }
   return $self->titles->[0];
 }
-
 
 
 package File;
@@ -259,18 +292,20 @@ has 'sample' => ( isa=>'Str', is=>'rw', default=>'25-75' );
 
 has 'selected'  => ( isa=>'Bool', is =>'rw', default=>method{1 if $self->length and $self->length > 120} );
 
-has _info => ( isa=>'HashRef', is=>'ro', lazy_build=>1 );
-#method _build__info { $self->container->titleinfo($self) }
-method _build__info {
-  #x '_info containter titles', $self->container->titles;
+has _input => ( isa=>'HashRef', is=>'ro', lazy_build=>1 );
+#method _build__input { $self->container->titleinfo($self) }
+method _build__input {
+  #x '_input containter titles', $self->container->titles;
   my $info = $self->container->titleinfo($self);
-  #x '_info', $info;
-  #x '_info containter titles', $self->container->titles;
+  #x '_input', $info;
+  #x '_input containter titles', $self->container->titles;
   return $info;
  }
 
-method videoresolution   { $self->_info->{videoresolution}   }
-method displayresolution { $self->_info->{displayresolution} }
+method videoresolution   { $self->_input->{videoresolution}   }
+method displayresolution { $self->_input->{displayresolution} }
+method anamorphics {
+}
 
 # List of an element is in an array
 #
@@ -314,8 +349,8 @@ sub langcompare {
 }
 
 # Available languages from title
-method audiolang         { $self->_info->{audiolang} || [] }
-method subtitle          { $self->_info->{subtitle}  || [] }
+method audiolang         { $self->_input->{audiolang} || [] }
+method subtitle          { $self->_input->{subtitle}  || [] }
 
 # Chosen output languages
 has selectedaudio    => ( isa=>'Str', is=>'rw', lazy_build=>1 );
@@ -426,17 +461,12 @@ method langset ( Str $lang ) {
 }
 
 has 'length'    => ( isa=>'Num', is =>'ro', lazy_build=>1 );
-method _build_length { $self->_info->{length} }
+method _build_length { $self->_input->{length} }
 
 has 'cropline' => ( isa=>'Str', is=>'rw', lazy_build=>1 );
 method _build_cropline { $self->displayresolution }
 
 
-method preview {
-  my $cmd = $self->container->cmd( 'preview', $self );
-  warn "*** title preview $cmd\n";
-  qx,$cmd,;
-}
 
 method cropdetect {
   my $cmd = $self->container->cmd( 'cropdetect', $self );
@@ -458,11 +488,78 @@ method cropdetect {
   if ( $cropline ) {
     # Cropping detected
     warn "*** cropline $cropline\n";
-    $cropline =~ /crop=([\d\:]+)/ and return $1;
+    $cropline =~ /crop=([\d\:]+)/ and my @d = split /[:x]/, $1;
+    return Area->new(
+      w => $d[0], h => $d[1],
+      x => $d[2], y => $d[3],
+      pixelaspect=> $self->videoresolution->pixelaspect,
+    );
   } else {
     # no cropping detected so use full resolution
     return $self->videoresolution;
   }
+}
+
+# Video resolution of target device
+
+# XXX: TODO various resolutions
+# Device resolution depends on frame rate
+# According to AVC level 3.0 specs:
+# rate < 25 => 720x576
+# rate < 30 => 720x480
+#
+# XXX: TODO Internal screen is 3:2, but TV-out is 16:9
+#
+has device => (
+  isa=>'Area',
+  is=>'ro',
+  default=>sub{Area->new(w=>720, h=>480, pixelaspect=>(16/9)/(720/480))}
+);
+
+# Crop and scale video to fit withint device resolution
+# XXX: Only crop if it reduces black bands
+#
+method resize {
+
+  #my($xi,$yi) = split /[:x]/, $self->videoresolution;
+  #my($xd,$yd) = split /[:x]/, $self->displayresolution;
+  #my($xc,$yc) = split /[:x]/, $self->cropline;
+  #my($dw,$dh) = split /[:x]/, $self->deviceresolution;
+
+  #my $xr = $xd * $xc / $xi;         # 854 * 704 / 720 => 835
+  #my $yr = $yd * $yc / $yi;         # 480 * 464 / 480 => 464
+  #my($xo,$yo,$b);
+
+  ## (16/9) / (720/480) = Anamorphic 1.18518
+  #my $an = $self->deviceaspect / ($dw/$dh);
+
+  #if ( $xr/$yr > 16/9 ) {
+  #  # Too wide
+  #  $xo = $dw;
+  #  $yo = int ( $dw / $xr * $yr * $an );  # 720 / 835 * 464 * 1.18 => 472
+  #  $b = $yo / $dh;                       # 472 / 480 => 98%
+  #} else {
+  #  # Too tall
+  #  $xo = int ( $dh / $yr * $xr / $an );  # 480 / 464 * 835 / 1.18 => 732
+  #  $yo = $dh;
+  #  $b = $xo / $dw;                       # 863 / 720 => 120 %
+  #}
+
+
+  if ( $self->crop->aspect > $self->device->aspect ) {
+    # Too wide
+  } else {
+    # Too tall
+  }
+}
+
+
+#return join 'x', ( split /[:x]/, $self->cropline )[0,1];
+
+method preview {
+  my $cmd = $self->container->cmd( 'preview', $self );
+  warn "*** title preview $cmd\n";
+  qx,$cmd,;
 }
 
 # For crop detect and for render sample, decide length of sample
@@ -701,5 +798,5 @@ __PACKAGE__->meta->make_immutable;
 
 die "Usage: $0 <mediasource>\n" unless @ARGV;
 my $media = Media->new( source => shift @ARGV );
-#x 'media', $media->container->titles->[0]->_info;
+#x 'media', $media->container->titles->[0]->_input;
 Batch->new( media=>$media )->selecttitles->tuning;
