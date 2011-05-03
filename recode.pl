@@ -546,15 +546,25 @@ method resize {
   #}
 
 
-  if ( $self->crop->aspect > $self->device->aspect ) {
+  my $stretch = $self->crop->aspect / $self->device->aspect;
+  my $area;
+  if ( $stretch > 1 ) {
     # Too wide
+    $area = Area->new(
+      w => $self->device->w,
+      h => $self->crop->h / $stretch,
+    );
+      
   } else {
     # Too tall
+    $area = Area->new(
+      w => $self->crop->w / $stretch,
+      h => $self->device->h,
+    );
   }
+  return $area;
 }
 
-
-#return join 'x', ( split /[:x]/, $self->cropline )[0,1];
 
 method preview {
   my $cmd = $self->container->cmd( 'preview', $self );
