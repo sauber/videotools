@@ -15,26 +15,47 @@ use Moose;
 use MooseX::Method::Signatures;
 
 # Width, height dimensions
-has w => ( isa=>'Num', is=>'ro', default=>0 );
-has h => ( isa=>'Num', is=>'ro', default=>0 );
+has w => ( isa=>'Num', is=>'rw', default=>0 );
+has h => ( isa=>'Num', is=>'rw', default=>0 );
 has pixelaspect => ( isa=>'Num', is=>'rw', default=>1 );
 
 # x,y offset
 has x => ( isa=>'Num', is=>'ro' );
 has y => ( isa=>'Num', is=>'ro' );
 
-# Dimension aspect
+# Dimension aspect compensated for pixelaspect
 #
 method aspect {
   return 1 unless $self->h() > 0 and $self->w() > 0;
-  return $self->w() / $self-h() * $self->pixelaspect;
+  return $self->w() / $self->h() * $self->pixelaspect;
 }
 
 # Render string: WxH
 # Render string: W:H
 #
-method wxh { sprintf "%dx%d", $self->w, $self->h }
-method wch { sprintf "%d:%d", $self->w, $self->h }
+method wxh { sprintf "%dx%d", 0.5+$self->w, 0.5+$self->h }
+method wch { sprintf "%d:%d", 0.5+$self->w, 0.5+$self->h }
+
+# Make a new Area object which is scaled to fit within target area
+# Keep pixelaspect of target area.
+#
+method scale_to_fit ( Area $target ) {
+  my $scaled = Area->new(
+    w => $target->w,
+    h => $target->h,
+    pixelaspect => $target->pixelaspect,
+  );
+  my $stretch = $self->aspect / $target->aspect;
+  warn "*** Area scale_to_fit stretch $stretch\n";
+  if ( $stretch > 1 ) {
+    # Too wide, so reduce height
+    $scaled->h( $scaled->h / $stretch );
+  } else {
+    # Too tall, so reduce width
+    $scaled->w( $scaled->w * $stretch );
+  }
+  return $scaled;
+}
 
 __PACKAGE__->meta->make_immutable;
 
@@ -807,6 +828,11 @@ __PACKAGE__->meta->make_immutable;
 #}
 
 die "Usage: $0 <mediasource>\n" unless @ARGV;
-my $media = Media->new( source => shift @ARGV );
+#my $media = Media->new( source => shift @ARGV );
 #x 'media', $media->container->titles->[0]->_input;
-Batch->new( media=>$media )->selecttitles->tuning;
+#Batch->new( media=>$media )->selecttitles->tuning;
+
+# Test resizing
+my $video = Area->new( w=>720, h=>576, pixelaspect=>(1024/720) );
+my $psp = Area->new( w=>720, h=>480, pixelaspect=>(16/9)/(720/480) );
+print $video->scale_to_fit( $psp )->wch;
