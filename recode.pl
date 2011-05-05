@@ -2,8 +2,7 @@
 
 # Convert DVD or single video file input source to 720x480 mpeg4
 # playable on PSP TV out.
-# Soren - Apr 2011
-
+# Soren - May 2011
 
 
 package Area;
@@ -60,6 +59,7 @@ method scale_to_fit ( Area $target ) {
 # Calculate aspect as a fraction
 #
 method fraction {
+  return '' unless $self->h and $self->w;
   my $gcf;
   my $y = int 0.5 + $self->h;
   my $x = int 0.5 + $self->w * $self->pixelaspect;
@@ -76,6 +76,177 @@ method display {
   return Area->new( w=>$self->w * $self->pixelaspect, h=>$self->h );
 }
   
+
+__PACKAGE__->meta->make_immutable;
+
+
+package Language;
+########################################################################
+### AREA
+########################################################################
+
+use Moose;
+use MooseX::Method::Signatures;
+
+# Chosen output languages
+has audio    => ( isa=>'Str', is=>'rw', lazy_build=>1 );
+method _build_audio    { (split /:/, $self->langpreferred)[0] || '' }
+has subtitle => ( isa=>'Str', is=>'rw', lazy_build=>1 );
+method _build_subtitle { (split /:/, $self->langpreferred)[1] || '' }
+
+# Set of languages available in input
+has available_audio    => ( isa=>'ArrayRef[Str]', is=>'rw' );
+has available_subtitle => ( isa=>'ArrayRef[Str]', is=>'rw' );
+
+# Select language according to preferences
+# Uppercase for primary languages, lowercase for secondary
+#
+# DA or JA is main audio, use if suitable subtitles
+#   DA audio, ja subt
+#   JA audio, da subt
+#   DA audio, en subt
+#   JA audio, en subt
+#
+# DA or JA is available audio, try suitable subtitles
+#   da audio, ja subt
+#   ja audio, da subt
+#   da audio, en subt
+#   ja audio, en subt
+#   da audio, none subt
+#   ja audio, none subt
+#
+# EN is available audio, try JA subtitle
+#   en audio, ja subt
+#   en audio, none subt
+#
+# No preferred audio available, try subtitles
+#   ORIG audio, en subt
+#   ORIG audio, ja subt
+#   ORIG audio, da subt
+#   ORIG audio, ORIG subt
+#   ORIG audio, none subt
+
+# No audio is available, try subtitles
+#   none audio, ORIG subt
+#   none audio, none subt
+#
+has preference => ( isa=>'ArrayRef[Str]', is=>'ro', default=>sub
+  {
+    qw(
+      DA:jp
+      JA:da
+      DA:en
+      JA:en
+
+      da:ja
+      ja:da
+      da:en
+      ja:en
+      da:none
+      ja:none
+
+      en:ja
+      en:none
+
+      orig:en
+      orig:ja
+      orig:da
+      orig:orig
+      orig:none
+
+      none:orig
+      none:none
+    )
+  }
+);
+
+# Element is in an array
+#
+sub inarray {
+  my($elem,@list) = @_;
+
+  for my $i ( @list ) {
+    return 1 if $i eq $elem;
+  }
+  return undef;
+}
+
+# Compare two languages
+#  - DA, first langauage is da
+#  - da, any language is da
+#  - none, empty choices
+#  - orig, the first language
+sub langcompare {
+  my($pref,@lang) = @_;
+
+  # There are no languages, and that's what we want
+  return '' if $pref eq 'none' and @lang == 0;
+
+  # We do want languages, but there are none
+  return undef if @lang == 0;
+
+  # Choose first language
+  return $lang[0] if $pref eq 'orig';
+
+  # Preferred language is first
+  return $lang[0] if $pref eq uc $lang[0];
+
+  # Preferred language is among the choices
+  return $pref if inarray($pref,@lang);
+
+  # No language is ok
+  return '' if $pref eq 'none';
+
+  # Nothing matches
+  return undef;
+}
+
+
+
+has langpreferred => ( isa=>'Str', is=>'ro', lazy_build=>1 );
+method _build_langpreferred {
+  # Available languages in input
+  my @audio    = @{ $self->available_audio    };
+  my @subtitle = @{ $self->available_subtitle };
+  my @pref     = @{ $self->preference };
+
+  my $primaudio = uc $audio[0]    if $audio[0];
+  my $primsubt  = uc $subtitle[0] if $subtitle[0];
+
+  # Run through preferences in order, and see if any can be honered
+  my $language = '';
+  for my $p ( @pref ) {
+    #warn "*** langpreferred test if $p match @audio:@subtitle\n";
+    my($prefa,$prefs) = split /:/, $p;
+    my $chosenlang = langcompare($prefa,@audio);
+    next unless defined $chosenlang;
+    my $chosensubt = langcompare($prefs,@subtitle);
+    next unless defined $chosensubt;
+    #last if $choice;
+    #$language = lc $p;
+    $language = "$chosenlang:$chosensubt";
+    #warn "*** langpreferred is $language\n";
+    last;
+  }
+
+  #warn sprintf "*** Language Auto Select: %s from (@audio:@subtitle)\n",
+  #  ( $language || '(undef)' );
+  return $language;
+}
+
+# User defined output languages
+method set ( Str $lang ) {
+  #warn "*** Title langset $lang\n";
+  #my @audio    = @{ $self->audiolang };
+  #my @subtitle = @{ $self->subtitle  };
+  #warn "*** Language Auto Select: $lang from (@audio:@subtitle)\n";
+
+  my($audio,$subtitle) = split /[\s:\,]/, $lang;
+  $self->audio(    $audio    );
+  $self->subtitle( $subtitle );
+}
+
+
 
 __PACKAGE__->meta->make_immutable;
 
@@ -156,14 +327,14 @@ method cmd ( Str $action, Ref $title? ) {
         if $title->samplelength < $title->length;
       push @opt, sprintf("-vf rectangle=%s", $title->crop->line)
         if $title->crop->wch ne $title->video->wch;
-      push @opt, sprintf("-aid %d", $title->selectedaudio)
-        if $title->selectedaudio =~ /^\d+$/;
-      push @opt, sprintf("-alang %s", $title->selectedaudio)
-        if $title->selectedaudio =~ /^\D+$/;
-      push @opt, sprintf("-sid %d", $title->selectedsubtitle)
-        if $title->selectedsubtitle =~ /^\d+$/;
-      push @opt, sprintf("-slang %s", $title->selectedsubtitle)
-        if $title->selectedsubtitle =~ /^\D+$/;
+      push @opt, sprintf("-aid %d", $title->language->audio)
+        if $title->language->audio =~ /^\d+$/;
+      push @opt, sprintf("-alang %s", $title->language->audio)
+        if $title->language->audio =~ /^\D+$/;
+      push @opt, sprintf("-sid %d", $title->language->subtitle)
+        if $title->language->subtitle =~ /^\d+$/;
+      push @opt, sprintf("-slang %s", $title->language->subtitle)
+        if $title->language->subtitle =~ /^\D+$/;
 
       return sprintf
         'mplayer %s %s', join(' ', @opt), $self->titlesource( $title );
@@ -200,10 +371,10 @@ method titleinfo ( Ref $title ) {
       /CHAPTERS: (\S+),/       and         $info{chapters}    = $1;
       /ID_LENGTH=([\d\.]+)/    and         $info{length}      = $1;
       /ID_VIDEO_FPS=([\d\.]+)/ and         $info{fps}         = $1;
-      /VO: \[null\] (\d+)x(\d+) => (\d+)x(\d+)/ and do {
-         #$info{video}   = $1;
-         #$info{displayresolution} = $2;
-         $info{video}   = Area->new( w=>$1, h=>$2, pixelaspect=>($3/$4)/($1/$2) );
+      /VO: \[null\] (\d+x\d+) => (\d+x\d+)/ and do {
+         $info{video}   = $1;
+         $info{display} = $2;
+         #$info{video}   = Area->new( w=>$1, h=>$2, pixelaspect=>($3/$4)/($1/$2) );
          #$info{displayresolution} = Area->new( w=>$3, h=>$4 );
       };
     }
@@ -342,160 +513,13 @@ method _build__input {
  }
 
 method fps               { $self->_input->{fps}               }
-method video   { $self->_input->{video}   }
-#method displayresolution { $self->_input->{displayresolution} }
-
-# List of an element is in an array
-#
-sub inarray {
-  my($elem,@list) = @_;
-
-  for my $i ( @list ) {
-    return 1 if $i eq $elem;
-  }
-  return undef;
-}
-
-# Compare two languages
-#  - DA, first langauage is da
-#  - da, any language is da
-#  - none, empty choices
-#  - orig, the first language
-sub langcompare {
-  my($pref,@lang) = @_;
-
-  # There are no languages, and that's what we want
-  return '' if $pref eq 'none' and @lang == 0;
-
-  # We do want languages, but there are none
-  return undef if @lang == 0;
-
-  # Choose first language
-  return $lang[0] if $pref eq 'orig';
-
-  # Preferred language is first
-  return $lang[0] if $pref eq uc $lang[0];
-
-  # Preferred language is among the choices
-  return $pref if inarray($pref,@lang);
-
-  # No language is ok
-  return '' if $pref eq 'none';
-
-  # Nothing matches
-  return undef;
-}
-
-# Available languages from title
-method audiolang         { $self->_input->{audiolang} || [] }
-method subtitle          { $self->_input->{subtitle}  || [] }
-
-# Chosen output languages
-has selectedaudio    => ( isa=>'Str', is=>'rw', lazy_build=>1 );
-method _build_selectedaudio    { (split /:/, $self->langpreferred)[0] || '' }
-has selectedsubtitle => ( isa=>'Str', is=>'rw', lazy_build=>1 );
-method _build_selectedsubtitle { (split /:/, $self->langpreferred)[1] || '' }
-
-# Select language according to preferences
-# Uppercase for primary languages, lowercase for secondary
-#
-# DA or JA is main audio, use if suitable subtitles
-#   DA audio, ja subt
-#   JA audio, da subt
-#   DA audio, en subt
-#   JA audio, en subt
-#
-# DA or JA is available audio, try suitable subtitles
-#   da audio, ja subt
-#   ja audio, da subt
-#   da audio, en subt
-#   ja audio, en subt
-#   da audio, none subt
-#   ja audio, none subt
-#
-# EN is available audio, try JA subtitle
-#   en audio, ja subt
-#   en audio, none subt
-#
-# No preferred audio available, try subtitles
-#   ORIG audio, en subt
-#   ORIG audio, ja subt
-#   ORIG audio, da subt
-#   ORIG audio, ORIG subt
-#   ORIG audio, none subt
-
-# No audio is available, try subtitles
-#   none audio, ORIG subt
-#   none audio, none subt
-#
-sub language_preferences {
-  qw(
-    DA:jp
-    JA:da
-    DA:en
-    JA:en
-
-    da:ja
-    ja:da
-    da:en
-    ja:en
-    da:none
-    ja:none
-
-    en:ja
-    en:none
-
-    orig:en
-    orig:ja
-    orig:da
-    orig:orig
-    orig:none
-
-    none:orig
-    none:none
-  );
-}
-
-has langpreferred => ( isa=>'Str', is=>'ro', lazy_build=>1 );
-method _build_langpreferred {
-  # Available languages in input
-  my @audio    = @{ $self->audiolang };
-  my @subtitle = @{ $self->subtitle  };
-
-  my $primaudio = uc $audio[0]    if $audio[0];
-  my $primsubt  = uc $subtitle[0] if $subtitle[0];
-
-  # Run through preferences in order, and see if any can be honered
-  my $language = '';
-  for my $p ( language_preferences ) {
-    #warn "*** langpreferred test if $p match @audio:@subtitle\n";
-    my($prefa,$prefs) = split /:/, $p;
-    my $chosenlang = langcompare($prefa,@audio);
-    next unless defined $chosenlang;
-    my $chosensubt = langcompare($prefs,@subtitle);
-    next unless defined $chosensubt;
-    #last if $choice;
-    #$language = lc $p;
-    $language = "$chosenlang:$chosensubt";
-    #warn "*** langpreferred is $language\n";
-    last;
-  }
-
-  #warn sprintf "*** Language Auto Select: %s from (@audio:@subtitle)\n",
-    ( $language || '(undef)' );
-  return $language;
-}
-
-# User defined output languages
-method langset ( Str $lang ) {
-  #warn "*** Title langset $lang\n";
-  my @audio    = @{ $self->audiolang };
-  my @subtitle = @{ $self->subtitle  };
-  #warn "*** Language Auto Select: $lang from (@audio:@subtitle)\n";
-
-  my($audio,$subtitle) = split /:/, $lang;
-  $self->selectedaudio(    $audio    );
-  $self->selectedsubtitle( $subtitle );
+has video => ( isa=>'Area', is=>'ro', lazy_build=>1 );
+method _build_video   {
+  #x '_input', $self->_input;
+  return new Area unless $self->_input->{video} and $self->_input->{display};
+  my($w,$h) = split /[x:]/, $self->_input->{video};
+  my($x,$y) = split /[x:]/, $self->_input->{display};
+  return Area->new( w=>$w, h=>$h, pixelaspect=>($x/$y)/($w/$h) );
 }
 
 has 'length'    => ( isa=>'Num', is =>'ro', lazy_build=>1 );
@@ -748,7 +772,7 @@ method tuning {
       when ( 'c' ) { $title->crop($title->video)                 }
 
       # Language
-      when ( 'l' ) { $title->langset($arg) }
+      when ( 'l' ) { $title->language->set($arg) }
 
       #/^c\s*(.*)/  and croppreview($1 || $dvd{current}),         next;
       #/^d/         and print "Not implemented\n";
@@ -788,8 +812,8 @@ method datadump {
     printf "    Audio   : %s\n", join ',', @{ $title->audiolang };
     printf "    Subtitle: %s\n", join ',', @{ $title->subtitle };
     print "  Output:\n";
-    printf "    Audio   : %s\n", $title->selectedaudio;
-    printf "    Subtitle: %s\n", $title->selectedsubtitle;
+    printf "    Audio   : %s\n", $title->language->audio;
+    printf "    Subtitle: %s\n", $title->language->subtitle;
     printf "    Device  : %s\n", $title->device->wxh;
     printf "    Crop    : %s\n", $title->crop->line;
     printf "    Resize  : %s\n", $title->crop->scale_to_fit($title->device)->wxh;
