@@ -20,8 +20,8 @@ has h => ( isa=>'Num', is=>'rw', default=>0 );
 has pixelaspect => ( isa=>'Num', is=>'rw', default=>1 );
 
 # x,y offset
-has x => ( isa=>'Num', is=>'ro' );
-has y => ( isa=>'Num', is=>'ro' );
+has x => ( isa=>'Num', is=>'ro', default=>0 );
+has y => ( isa=>'Num', is=>'ro', default=>0 );
 
 # Dimension aspect compensated for pixelaspect
 #
@@ -30,11 +30,11 @@ method aspect {
   return $self->w() / $self->h() * $self->pixelaspect;
 }
 
-# Render string: WxH
-# Render string: W:H
+# Render string
 #
 method wxh { sprintf "%dx%d", 0.5+$self->w, 0.5+$self->h }
 method wch { sprintf "%d:%d", 0.5+$self->w, 0.5+$self->h }
+method line { sprintf "%d:%d:%d:%d", 0.5+$self->w, 0.5+$self->h, 0.5+$self->x, 0.5+$self->y }
 
 # Make a new Area object which is scaled to fit within target area
 # Keep pixelaspect of target area.
@@ -46,7 +46,7 @@ method scale_to_fit ( Area $target ) {
     pixelaspect => $target->pixelaspect,
   );
   my $stretch = $self->aspect / $target->aspect;
-  warn "*** Area scale_to_fit stretch $stretch\n";
+  #warn "*** Area scale_to_fit stretch $stretch\n";
   if ( $stretch > 1 ) {
     # Too wide, so reduce height
     $scaled->h( $scaled->h / $stretch );
@@ -56,6 +56,26 @@ method scale_to_fit ( Area $target ) {
   }
   return $scaled;
 }
+
+# Calculate aspect as a fraction
+#
+method fraction {
+  my $gcf;
+  my $y = int 0.5 + $self->h;
+  my $x = int 0.5 + $self->w * $self->pixelaspect;
+  # Find greatest common factor
+  for my $n ( 1 .. $y ) {
+    $gcf = $n if $y % $n == 0 and $x % $n == 0;
+  }
+  return sprintf "%d/%d", $x/$gcf, $y/$gcf;
+}
+
+# New object compensated for pixelaspect
+#
+method display {
+  return Area->new( w=>$self->w * $self->pixelaspect, h=>$self->h );
+}
+  
 
 __PACKAGE__->meta->make_immutable;
 
@@ -134,8 +154,8 @@ method cmd ( Str $action, Ref $title? ) {
         if $title->samplestart > 0;
       push @opt, sprintf("-endpos %s", $title->samplelength)
         if $title->samplelength < $title->length;
-      push @opt, sprintf("-vf rectangle=%s", $title->cropline)
-        if $title->cropline ne $title->videoresolution;
+      push @opt, sprintf("-vf rectangle=%s", $title->crop->line)
+        if $title->crop->wch ne $title->video->wch;
       push @opt, sprintf("-aid %d", $title->selectedaudio)
         if $title->selectedaudio =~ /^\d+$/;
       push @opt, sprintf("-alang %s", $title->selectedaudio)
@@ -181,10 +201,10 @@ method titleinfo ( Ref $title ) {
       /ID_LENGTH=([\d\.]+)/    and         $info{length}      = $1;
       /ID_VIDEO_FPS=([\d\.]+)/ and         $info{fps}         = $1;
       /VO: \[null\] (\d+)x(\d+) => (\d+)x(\d+)/ and do {
-         #$info{videoresolution}   = $1;
+         #$info{video}   = $1;
          #$info{displayresolution} = $2;
-         $info{videoresolution}   = Area->new( w=>$1, h=>$2 );
-         $info{displayresolution} = Area->new( w=>$3, h=>$4 );
+         $info{video}   = Area->new( w=>$1, h=>$2, pixelaspect=>($3/$4)/($1/$2) );
+         #$info{displayresolution} = Area->new( w=>$3, h=>$4 );
       };
     }
   #x 'container titleinfo', $self->titles;
@@ -250,8 +270,6 @@ use Moose;
 use MooseX::Method::Signatures;
 has 'media' => ( isa=>'Media', is =>'ro', required=>1 );
 
-#our $scanmedia = 'mplayer -identify -frames 1 -vo null -ao null -dvd-device';
-
 method mediasource  {
   my $input = $self->media->source;
   return qq,-dvd-device "$input" dvd://,;
@@ -282,7 +300,7 @@ method _build_titles {
       container => $self,
       ( $title{$_}{length}   ? ( length   => $title{$_}{length}   ) : () ),
       ( $title{$_}{chapters} ? ( chapters => $title{$_}{chapters} ) : () ),
-    ), sort keys %title ];
+    ), sort { $a <=> $b } keys %title ];
 
 }
 
@@ -319,14 +337,13 @@ method _build__input {
   #x '_input containter titles', $self->container->titles;
   my $info = $self->container->titleinfo($self);
   #x '_input', $info;
-  #x '_input containter titles', $self->container->titles;
+  #x '_input container titles', $self->container->titles;
   return $info;
  }
 
-method videoresolution   { $self->_input->{videoresolution}   }
-method displayresolution { $self->_input->{displayresolution} }
-method anamorphics {
-}
+method fps               { $self->_input->{fps}               }
+method video   { $self->_input->{video}   }
+#method displayresolution { $self->_input->{displayresolution} }
 
 # List of an element is in an array
 #
@@ -419,11 +436,11 @@ sub language_preferences {
     JA:en
 
     da:ja
-    jA:da
-    dA:en
-    jA:en
-    dA:none
-    jA:none
+    ja:da
+    da:en
+    ja:en
+    da:none
+    ja:none
 
     en:ja
     en:none
@@ -451,7 +468,7 @@ method _build_langpreferred {
   # Run through preferences in order, and see if any can be honered
   my $language = '';
   for my $p ( language_preferences ) {
-    warn "*** langpreferred test if $p match @audio:@subtitle\n";
+    #warn "*** langpreferred test if $p match @audio:@subtitle\n";
     my($prefa,$prefs) = split /:/, $p;
     my $chosenlang = langcompare($prefa,@audio);
     next unless defined $chosenlang;
@@ -460,21 +477,21 @@ method _build_langpreferred {
     #last if $choice;
     #$language = lc $p;
     $language = "$chosenlang:$chosensubt";
-    warn "*** langpreferred is $language\n";
+    #warn "*** langpreferred is $language\n";
     last;
   }
 
-  warn sprintf "*** Language Auto Select: %s from (@audio:@subtitle)\n",
+  #warn sprintf "*** Language Auto Select: %s from (@audio:@subtitle)\n",
     ( $language || '(undef)' );
   return $language;
 }
 
 # User defined output languages
 method langset ( Str $lang ) {
-  warn "*** Title langset $lang\n";
+  #warn "*** Title langset $lang\n";
   my @audio    = @{ $self->audiolang };
   my @subtitle = @{ $self->subtitle  };
-  warn "*** Language Auto Select: $lang from (@audio:@subtitle)\n";
+  #warn "*** Language Auto Select: $lang from (@audio:@subtitle)\n";
 
   my($audio,$subtitle) = split /:/, $lang;
   $self->selectedaudio(    $audio    );
@@ -484,8 +501,8 @@ method langset ( Str $lang ) {
 has 'length'    => ( isa=>'Num', is =>'ro', lazy_build=>1 );
 method _build_length { $self->_input->{length} }
 
-has 'cropline' => ( isa=>'Str', is=>'rw', lazy_build=>1 );
-method _build_cropline { $self->displayresolution }
+has 'crop' => ( isa=>'Area', is=>'rw', lazy_build=>1 );
+method _build_crop { $self->video }
 
 
 
@@ -496,28 +513,28 @@ method cropdetect {
 
   # Look for
   #   [CROP] Crop area: X: 0..719  Y: 0..477  (-vf crop=720:464:0:8).
-  my $cropline;
+  my $crop;
   open CROP, qq,$cmd 2>/dev/null |,;
     while(<CROP>){
       #print;
       next unless /CROP/;
       chomp;
-      $cropline = $_;
+      $crop = $_;
     }
   close CROP;
 
-  if ( $cropline ) {
+  if ( $crop ) {
     # Cropping detected
-    warn "*** cropline $cropline\n";
-    $cropline =~ /crop=([\d\:]+)/ and my @d = split /[:x]/, $1;
+    warn "*** crop $crop\n";
+    $crop =~ /crop=([\d\:]+)/ and my @d = split /[:x]/, $1;
     return Area->new(
       w => $d[0], h => $d[1],
       x => $d[2], y => $d[3],
-      pixelaspect=> $self->videoresolution->pixelaspect,
+      pixelaspect=> $self->video->pixelaspect,
     );
   } else {
     # no cropping detected so use full resolution
-    return $self->videoresolution;
+    return $self->video;
   }
 }
 
@@ -534,58 +551,12 @@ method cropdetect {
 has device => (
   isa=>'Area',
   is=>'ro',
-  default=>sub{Area->new(w=>720, h=>480, pixelaspect=>(16/9)/(720/480))}
+  default=>sub {
+    my $self = shift;
+    my $h = $self->fps <= 25 ? 576 : 480;
+    return Area->new( w=>720, h=>$h, pixelaspect=>(16/9)/(720/$h) );
+  },
 );
-
-# Crop and scale video to fit withint device resolution
-# XXX: Only crop if it reduces black bands
-#
-method resize {
-
-  #my($xi,$yi) = split /[:x]/, $self->videoresolution;
-  #my($xd,$yd) = split /[:x]/, $self->displayresolution;
-  #my($xc,$yc) = split /[:x]/, $self->cropline;
-  #my($dw,$dh) = split /[:x]/, $self->deviceresolution;
-
-  #my $xr = $xd * $xc / $xi;         # 854 * 704 / 720 => 835
-  #my $yr = $yd * $yc / $yi;         # 480 * 464 / 480 => 464
-  #my($xo,$yo,$b);
-
-  ## (16/9) / (720/480) = Anamorphic 1.18518
-  #my $an = $self->deviceaspect / ($dw/$dh);
-
-  #if ( $xr/$yr > 16/9 ) {
-  #  # Too wide
-  #  $xo = $dw;
-  #  $yo = int ( $dw / $xr * $yr * $an );  # 720 / 835 * 464 * 1.18 => 472
-  #  $b = $yo / $dh;                       # 472 / 480 => 98%
-  #} else {
-  #  # Too tall
-  #  $xo = int ( $dh / $yr * $xr / $an );  # 480 / 464 * 835 / 1.18 => 732
-  #  $yo = $dh;
-  #  $b = $xo / $dw;                       # 863 / 720 => 120 %
-  #}
-
-
-  my $stretch = $self->crop->aspect / $self->device->aspect;
-  my $area;
-  if ( $stretch > 1 ) {
-    # Too wide
-    $area = Area->new(
-      w => $self->device->w,
-      h => $self->crop->h / $stretch,
-    );
-      
-  } else {
-    # Too tall
-    $area = Area->new(
-      w => $self->crop->w / $stretch,
-      h => $self->device->h,
-    );
-  }
-  return $area;
-}
-
 
 method preview {
   my $cmd = $self->container->cmd( 'preview', $self );
@@ -633,8 +604,8 @@ method titlesummary {
   my $summary = sprintf "%7s,%2d,%s,%s,%s,%s",
     $self->humanduration,
     $self->chapters,
-    $self->videoresolution,
-    $self->displayresolution,
+    ( $self->video   ? $self->video->wxh   : '0x0'),
+    ( $self->video ? $self->video->fraction : ''),
     join('-', $self->audiolang ? @{$self->audiolang} : () ),
     join('-', $self->subtitle  ? @{$self->subtitle}  : () ),
     qw(4 5 6);
@@ -772,9 +743,9 @@ method tuning {
       when ( 'q'    ) { $done = 1 }
 
       # Cropping
-      when ( 'a' ) { $title->cropline($title->cropdetect)      }
-      when ( 'b' ) { $title->cropline($arg)                    }
-      when ( 'c' ) { $title->cropline($title->videoresolution) }
+      when ( 'a' ) { $title->crop($title->cropdetect)                      }
+      when ( 'b' ) { my%c; @c{qw(w h x y)}=split /[x:]/,$arg; $title->crop(Area->new(%c,pixelaspect=>$title->video->pixelaspect)) }
+      when ( 'c' ) { $title->crop($title->video)                 }
 
       # Language
       when ( 'l' ) { $title->langset($arg) }
@@ -806,10 +777,22 @@ method datadump {
   my $titles = $self->media->container->titles;
   for my $i ( 0 .. $#$titles ) {
     my $title = $titles->[$i];
+    next unless $title->selected;
+    #x 'title datadump', $title;
     printf "Title %s\n", $title->id;
     print "  Input:\n";
-    printf "    %s: %s\n", $_, $title->{$_} for grep defined $title->{$_}, keys %$title;
+    printf "    %-8s: %s\n", ucfirst($_), $title->$_ for qw(length fps chapters);
+    printf "    Video   : %s\n", $title->video->wxh;
+    printf "    Display : %s\n", $title->video->display->wxh;
+    printf "    Aspect  : %s\n", $title->video->fraction;
+    printf "    Audio   : %s\n", join ',', @{ $title->audiolang };
+    printf "    Subtitle: %s\n", join ',', @{ $title->subtitle };
     print "  Output:\n";
+    printf "    Audio   : %s\n", $title->selectedaudio;
+    printf "    Subtitle: %s\n", $title->selectedsubtitle;
+    printf "    Device  : %s\n", $title->device->wxh;
+    printf "    Crop    : %s\n", $title->crop->line;
+    printf "    Resize  : %s\n", $title->crop->scale_to_fit($title->device)->wxh;
 
   }
   return $self;
@@ -828,11 +811,11 @@ __PACKAGE__->meta->make_immutable;
 #}
 
 die "Usage: $0 <mediasource>\n" unless @ARGV;
-#my $media = Media->new( source => shift @ARGV );
+my $media = Media->new( source => shift @ARGV );
 #x 'media', $media->container->titles->[0]->_input;
-#Batch->new( media=>$media )->selecttitles->tuning;
+Batch->new( media=>$media )->selecttitles->tuning;
 
 # Test resizing
-my $video = Area->new( w=>720, h=>576, pixelaspect=>(1024/720) );
-my $psp = Area->new( w=>720, h=>480, pixelaspect=>(16/9)/(720/480) );
-print $video->scale_to_fit( $psp )->wch;
+#my $video = Area->new( w=>720, h=>576, pixelaspect=>(1024/720) );
+#my $psp = Area->new( w=>720, h=>480, pixelaspect=>(16/9)/(720/480) );
+#print $video->scale_to_fit( $psp )->wch;
