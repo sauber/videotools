@@ -291,6 +291,30 @@ method _build_container {
   return File->new( media => $self );
 }
 
+has batchname => ( isa=>'Str', is=>'ro', default=>sub{
+  my $source = shift->source;
+  $source =~ s,/*+$,,; # Remove trailing /
+  $source . ".batch.sh";
+});
+
+has dstfolder => ( isa=>'Str', is=>'ro', default=>sub{
+  my $source = shift->source;
+  $source =~ s,/*+$,,; # Remove trailing /
+  $source . ".psp";
+});
+
+method write_batch {
+  open BATCH, ">" . $self->batchname;
+    print BATCH <<EOF;
+
+# Create destination folder
+mkdir "$self->batchname"
+EOF
+
+  close BATCH;
+}
+
+
 sub x {
  use Data::Dumper;
  warn Data::Dumper->Dump([$_[1]], ["*** $_[0]"]);
@@ -308,35 +332,38 @@ package Video;
 use Moose::Role;
 use MooseX::Method::Signatures;
 use Carp qw(confess);
+use feature "switch";
 
 requires 'titles';
 requires 'titlesource';
 
 # Various command to extract data, preview and render
 #
-method cmd ( Str $action, Ref $title? ) {
-  for ( $action ) {
-
-    /scanmedia/ and return sprintf
+method cmd ( Str $action, Ref $title?, Int $chapter? ) {
+  given ( $action ) {
+    when ( 'scanmedia' ) { return sprintf
       'mplayer -identify -frames 1 -vo null -ao null %s',
-      $self->mediasource();
+      $self->mediasource()
+    }
 
-    /titleinfo/ and return sprintf
+    when ( 'titleinfo' ) { return sprintf
       'mplayer -identify -frames 1 -vo null -ao null %s',
-      $self->titlesource( $title );
+      $self->titlesource( $title )
+    }
 
-    /cropdetect/ and return sprintf
+    when ( 'cropdetect' ) { return sprintf
       'mplayer -nosound -vo null -benchmark -vf cropdetect -ss %d -endpos %d %s',
       $title->samplestart,
       $title->samplelength,
-      $self->titlesource( $title );
+      $self->titlesource( $title )
+    }
 
-    /preview/ and do {
+    when ( 'preview' ) {
       my @opt;
       push @opt, sprintf("-ss %s", $title->samplestart)
         if $title->samplestart > 0;
       push @opt, sprintf("-endpos %s", $title->samplelength)
-        if $title->samplelength < $title->length;
+        if $title->samplelength < int $title->length;
       push @opt, sprintf("-vf rectangle=%s", $title->crop->line)
         if $title->crop->wch ne $title->video->wch;
       push @opt, sprintf("-aid %d", $title->language->audio)
@@ -350,7 +377,57 @@ method cmd ( Str $action, Ref $title? ) {
 
       return sprintf
         'mplayer %s %s', join(' ', @opt), $self->titlesource( $title );
-    };
+    }
+
+    when ( 'encode' ) {
+      # Input Video Filter
+      my $vf = "-vf kerndeint";
+      $vf .= sprintf ",crop=%", $title->crop->line
+        if $title->crop->line ne $self->video->line;
+      $vf .= sprintf ",scale=%", $title->crop->scale_to_fit($title->device)->wxh
+        if $title->crop->scale_to_fit($title->device)->wxh ne $self->video->wxh;
+      $vf .= sprintf ",expand=%s", $self->device->wch;
+      $vf .= ",dsize=16/9,pp=al,denoise3d";
+     
+      # Language/Chapter Filter
+      my @opt;
+      push @opt, sprintf("-aid %d", $title->language->audio)
+        if $title->language->audio =~ /^\d+$/;
+      push @opt, sprintf("-alang %s", $title->language->audio)
+        if $title->language->audio =~ /^\D+$/;
+      push @opt, sprintf("-sid %d", $title->language->subtitle)
+        if $title->language->subtitle =~ /^\d+$/;
+      push @opt, sprintf("-slang %s", $title->language->subtitle)
+        if $title->language->subtitle =~ /^\D+$/;
+      push @opt, sprintf("-chapter %d-%d", $chapter)
+        if $chapter;
+
+      return sprintf 'mencoder %s
+  %s %s \
+  -oac pcm -af volnorm \
+  -ovc lavc -lavcopts vcodec=ffvhuff \
+  -o %s.tmp
+
+ffmpeg -i %s.tmp \
+  -ac 2 \
+  -vcodec libx264 \
+  -vpre hq \
+  -vpre main \
+  -level 30 \
+  -b 1400k \
+  -s %s \
+  -aspect 16:9 \
+  -y %s
+
+',
+        $self->titlesource( $title ),
+        $vf,
+        join('', map "\\\n  $_", @opt ),
+        $self->titletarget( $title, $chapter ),
+        $self->titletarget( $title, $chapter ),
+        $title->device->wxh,
+        $self->titletarget( $title, $chapter ),
+    }
   }
   die "No $action action not defined";
 }
@@ -411,6 +488,12 @@ method idtitle ( Num $id ) {
     return $t if $t->id eq $id;
   }
   return $self->titles->[0];
+}
+
+# Titles that are selected
+#
+method selectedtitles {
+  grep $_->selected, @{$self->titles}
 }
 
 
@@ -677,12 +760,11 @@ has 'media'   => ( isa=>'Media', is =>'ro' );
 has 'title' => ( isa=>'Title', is=>'rw', lazy_build=>1 );
 method _build_title {
   my $longest;
-  for my $obj ( @{ $self->media->container->titles } ) {
-    next unless $obj->selected;
-    $longest = $obj, next unless $longest;
-    $longest = $obj if
-      $obj->length and $longest->length and
-      $obj->length  >  $longest->length;
+  for my $title ( $self->media->container->selectedtitles ) {
+    $longest = $title, next unless $longest;
+    $longest = $title if
+      $title->length and $longest->length and
+      $title->length  >  $longest->length;
   }
   return $longest;
 }
@@ -694,12 +776,6 @@ method selecttitles {
   my($default,@result);
   do {
     $default = join ',', map $_->id, grep $_->selected, @$titles;
-    #x "selecttitles", $titles;
-    #my @items = map {
-    #  ( $_->selected ? '(*) ' : '    ' ) .
-    #  #'str'
-    #   $_->titlesummary
-    #} @$titles;
     my @items;
     for my $t ( @$titles ) {
       push @items,
@@ -733,15 +809,14 @@ method selecttitles {
 # #
 method menu {
   my $result;
-  #my $titleid = $self->media->container->titles->[$self->title]->id;
   my $titleid = $self->title->id;
   do {
     print <<EOF;
 Video Conversion Options
 ------------------------
-a) Autocrop [n]           h) Chapter-by-Chapter    s) Preview start-end
-b) Adjust crop [w:h:x:y]  i) Encoding Information  w) Write batch
-c) Cancel crop [n]        l) Language [a:s]        q) Quit
+a) Autocrop [n]           h) Chapter-by-Chapter [n]  s) Preview start-end
+b) Adjust crop [w:h:x:y]  i) Encoding Information    w) Write batch
+c) Cancel crop [n]        l) Language [a:s]          q) Quit
                           p) Preview [n]
 Current Title: $titleid
 EOF
@@ -785,23 +860,6 @@ method tuning {
       when ( 'l' ) { $title->language->set($arg) }
       when ( 'h' ) { $title->chapterbychapter(1-$title->chapterbychapter) }
       when ( 's' ) { $title->sample($arg) }
-
-      #/^c\s*(.*)/  and croppreview($1 || $dvd{current}),         next;
-      #/^d/         and print "Not implemented\n";
-      #/^f\s+(.*)/  and $dvd{title}{$dvd{current}}{file} = $1,    next;
-      #/^g\s+(.*)/  and $dvd{folder} = $1,                        next;
-      #/^h\s*(.*)/  and chaptertogle($1 || $dvd{current}),        next;
-      #/^i\s*(\d*)/ and encodesummary($1 || $dvd{current}),       next;
-      #/^l\s+(.*)/  and langset($dvd{current}, $1),               next;
-      #/^m/         and                                           next;
-      #/^p/         and $title->preview, next;
-      #/^q/         and $done = 1,                                next;
-      #/^r/         and print "Not implemented\n";
-      #/^s+(.*)/    and $dvd{title}{$dvd{current}}{sample} = $1,  next;
-      #/^t\s+(\d+)/ and $dvd{current} = $1,                       next;
-      #/^(\d+)/     and $dvd{current} = $1,                       next;
-      #/^u/         and print "Not implemented\n";
-      #/^w/         and writebatch(),                             next;
     }
   } until $done;
   return $self;
@@ -810,11 +868,7 @@ method tuning {
 # Print input and output data for selected titles
 #
 method datadump {
-  my $titles = $self->media->container->titles;
-  for my $i ( 0 .. $#$titles ) {
-    my $title = $titles->[$i];
-    next unless $title->selected;
-    #x 'title datadump', $title;
+  for my $title ( $self->media->container->selectedtitles ) {
     printf "Title %s\n", $title->id;
     print  "  Input:\n";
     printf "    %-8s: %s\n", ucfirst($_), $title->$_ for qw(length fps chapters);
@@ -831,6 +885,8 @@ method datadump {
     printf "    Crop    : %s\n", $title->crop->line;
     printf "    Resize  : %s\n", $title->crop->scale_to_fit($title->device)->wxh;
     printf "    Sample  : %s\n", join '-', $title->samplestart, $title->samplestart+$title->samplelength;
+    printf "    Batch   : %s\n", $self->media->batchname;
+    printf "    Target  : %s\n", $self->media->dstfolder;
 
   }
   return $self;
@@ -851,7 +907,7 @@ __PACKAGE__->meta->make_immutable;
 die "Usage: $0 <mediasource>\n" unless @ARGV;
 my $media = Media->new( source => shift @ARGV );
 #x 'media', $media->container->titles->[0]->_input;
-Batch->new( media=>$media )->selecttitles->tuning;
+Batch->new( media=>$media )->selecttitles->datadump->tuning;
 
 # Test resizing
 #my $video = Area->new( w=>720, h=>576, pixelaspect=>(1024/720) );
