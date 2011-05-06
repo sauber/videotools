@@ -413,7 +413,6 @@ method cmd ( Str $action, Ref $title?, Int $chapter? ) {
 
       return sprintf 'mencoder %s \
   %s %s \
-  -ss 25 -endpos 10 \
   -oac pcm -af volnorm \
   -ovc lavc -lavcopts vcodec=ffvhuff \
   -o %s.tmp
