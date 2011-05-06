@@ -304,13 +304,19 @@ has dstfolder => ( isa=>'Str', is=>'ro', default=>sub{
 });
 
 method write_batch {
+  warn sprintf "*** media write_batch write to %s\n", $self->batchname;
   open BATCH, ">" . $self->batchname;
-    print BATCH <<EOF;
-
-# Create destination folder
-mkdir "$self->batchname"
-EOF
-
+    printf BATCH 'mkdir "%s"', $self->dstfolder;
+    print BATCH "\n\n";
+    for my $title ( $self->container->selectedtitles ) {
+      if ( $title->chapterbychapter ) {
+        for my $chapter ( 1 .. $title->chapters ) {
+          print BATCH $self->container->cmd( 'encode', $title, $chapter );
+        }
+      } else {
+        print BATCH $self->container->cmd( 'encode', $title );
+      }
+    }
   close BATCH;
 }
 
@@ -383,10 +389,10 @@ method cmd ( Str $action, Ref $title?, Int $chapter? ) {
       # Input Video Filter
       my $vf = "-vf kerndeint";
       $vf .= sprintf ",crop=%", $title->crop->line
-        if $title->crop->line ne $self->video->line;
-      $vf .= sprintf ",scale=%", $title->crop->scale_to_fit($title->device)->wxh
-        if $title->crop->scale_to_fit($title->device)->wxh ne $self->video->wxh;
-      $vf .= sprintf ",expand=%s", $self->device->wch;
+        if $title->crop->line ne $title->video->line;
+      $vf .= sprintf ",scale=%s", $title->crop->scale_to_fit($title->device)->wch
+        if $title->crop->scale_to_fit($title->device)->wxh ne $title->video->wxh;
+      $vf .= sprintf ",expand=%s", $title->device->wch;
       $vf .= ",dsize=16/9,pp=al,denoise3d";
      
       # Language/Chapter Filter
@@ -399,11 +405,15 @@ method cmd ( Str $action, Ref $title?, Int $chapter? ) {
         if $title->language->subtitle =~ /^\d+$/;
       push @opt, sprintf("-slang %s", $title->language->subtitle)
         if $title->language->subtitle =~ /^\D+$/;
-      push @opt, sprintf("-chapter %d-%d", $chapter)
+      push @opt, sprintf("-chapter %d-%d", $chapter, $chapter)
         if $chapter;
 
-      return sprintf 'mencoder %s
+      my $target = '"' . $self->media->dstfolder . '"/'
+                 . $self->titletarget( $title, $chapter );
+
+      return sprintf 'mencoder %s \
   %s %s \
+  -ss 25 -endpos 10 \
   -oac pcm -af volnorm \
   -ovc lavc -lavcopts vcodec=ffvhuff \
   -o %s.tmp
@@ -419,14 +429,17 @@ ffmpeg -i %s.tmp \
   -aspect 16:9 \
   -y %s
 
+rm %s.tmp
+
 ',
         $self->titlesource( $title ),
         $vf,
         join('', map "\\\n  $_", @opt ),
-        $self->titletarget( $title, $chapter ),
-        $self->titletarget( $title, $chapter ),
+        $target,
+        $target,
         $title->device->wxh,
-        $self->titletarget( $title, $chapter ),
+        $target,
+        $target,
     }
   }
   die "No $action action not defined";
@@ -513,7 +526,13 @@ method mediasource  {
 }
 
 method titlesource ( Ref $title? )  {
-  $self->mediasource; 
+  '"' . $self->mediasource . '"'; 
+}
+
+method titletarget ( Ref $title?, Any $chapter? ) {
+  my $file = $self->media->source;
+  $file =~ s/(\.\w+)$/.psp.mp4/;
+  return '"' . $file . '"';
 }
 
 # A File only has one title
@@ -543,6 +562,15 @@ method mediasource  {
 
 method titlesource ( Ref $title )  {
   $self->mediasource . $title->id;
+}
+
+method titletarget ( Ref $title?, Any $chapter? ) {
+  my $file = $self->media->source;
+  $file =~ s/\/$//; # Remove trailing /
+  $file =~ s/.*\///; # Remove dirs
+  $file .= sprintf "-%02d", $title->id;
+  $file .= sprintf "-%02d", $chapter if $chapter;
+  '"' . $file . '.psp.mp4"';
 }
 
 # All the titles on a DVD
@@ -845,11 +873,12 @@ method tuning {
     $title = $container->idtitle($arg) if $arg and $arg =~ /^\d+$/;
 
     given ( $command ) {
-      # Select Title, Info, Preview, Quit
+      # Select Title, Info, Preview, Write, Quit
       when ( /^\d$/ ) { $self->title($container->idtitle($command)) }
       when ( 'i'    ) { $self->datadump }
       when ( 'p'    ) { $title->preview }
       when ( 'q'    ) { $done = 1 }
+      when ( 'w'    ) { $self->media->write_batch }
 
       # Cropping
       when ( 'a' ) { $title->crop($title->cropdetect)                      }
