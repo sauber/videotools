@@ -131,8 +131,7 @@ has available_subtitle => ( isa=>'ArrayRef[Str]', is=>'rw' );
 #   none audio, none subt
 #
 has preference => ( isa=>'ArrayRef[Str]', is=>'ro', default=>sub
-  {
-    qw(
+  { [ qw(
       DA:jp
       JA:da
       DA:en
@@ -156,8 +155,7 @@ has preference => ( isa=>'ArrayRef[Str]', is=>'ro', default=>sub
 
       none:orig
       none:none
-    )
-  }
+    ) ] }
 );
 
 # Element is in an array
@@ -246,6 +244,20 @@ method set ( Str $lang ) {
   $self->subtitle( $subtitle );
 }
 
+# Show langauges as string
+#   en-*da-it:*en-da-it
+method summary {
+  join ':',
+    join('-',
+      map { $_ eq $self->audio ? "*$_" : $_ }
+      @{ $self->available_audio }
+    ),
+    join('-',
+      map { $_ eq $self->subtitle ? "*$_" : $_ }
+      @{ $self->available_subtitle }
+    ),
+  ;
+}
 
 
 __PACKAGE__->meta->make_immutable;
@@ -498,28 +510,29 @@ has 'id'        => ( isa=>'Int', is =>'ro', required=>1 );
 has 'container' => ( isa=>'Video', is =>'ro', required=>1 );
 has 'media'     => ( isa=>'Media', is =>'ro' );
 has 'chapters'  => ( isa=>'Int', is =>'ro', default=>1 );
+has 'chapterbychapter'  => ( isa=>'Bool', is =>'rw', default=>0 );
 has 'sample' => ( isa=>'Str', is=>'rw', default=>'25-75' );
 
 has 'selected'  => ( isa=>'Bool', is =>'rw', default=>method{1 if $self->length and $self->length > 120} );
 
 has _input => ( isa=>'HashRef', is=>'ro', lazy_build=>1 );
-#method _build__input { $self->container->titleinfo($self) }
-method _build__input {
-  #x '_input containter titles', $self->container->titles;
-  my $info = $self->container->titleinfo($self);
-  #x '_input', $info;
-  #x '_input container titles', $self->container->titles;
-  return $info;
- }
+method _build__input { $self->container->titleinfo($self) }
 
 method fps               { $self->_input->{fps}               }
 has video => ( isa=>'Area', is=>'ro', lazy_build=>1 );
 method _build_video   {
-  #x '_input', $self->_input;
   return new Area unless $self->_input->{video} and $self->_input->{display};
   my($w,$h) = split /[x:]/, $self->_input->{video};
   my($x,$y) = split /[x:]/, $self->_input->{display};
   return Area->new( w=>$w, h=>$h, pixelaspect=>($x/$y)/($w/$h) );
+}
+
+has language => ( isa=>'Language', is=>'ro', lazy_build=>1 );
+method _build_language {
+  return Language->new(
+    available_audio    => ( $self->_input->{audiolang} || [] ),
+    available_subtitle => ( $self->_input->{subtitle}  || [] ),
+  );
 }
 
 has 'length'    => ( isa=>'Num', is =>'ro', lazy_build=>1 );
@@ -527,8 +540,6 @@ method _build_length { $self->_input->{length} }
 
 has 'crop' => ( isa=>'Area', is=>'rw', lazy_build=>1 );
 method _build_crop { $self->video }
-
-
 
 method cropdetect {
   my $cmd = $self->container->cmd( 'cropdetect', $self );
@@ -563,8 +574,7 @@ method cropdetect {
 }
 
 # Video resolution of target device
-
-# XXX: TODO various resolutions
+#
 # Device resolution depends on frame rate
 # According to AVC level 3.0 specs:
 # rate < 25 => 720x576
@@ -625,13 +635,14 @@ method humanduration {
 # A short description of title
 #
 method titlesummary {
-  my $summary = sprintf "%7s,%2d,%s,%s,%s,%s",
+  my $summary = sprintf "%7s,%2d,%s,%s,%s",
     $self->humanduration,
     $self->chapters,
     ( $self->video   ? $self->video->wxh   : '0x0'),
     ( $self->video ? $self->video->fraction : ''),
-    join('-', $self->audiolang ? @{$self->audiolang} : () ),
-    join('-', $self->subtitle  ? @{$self->subtitle}  : () ),
+    $self->language->summary,
+    #join('-', $self->audiolang ? @{$self->audiolang} : () ),
+    #join('-', $self->subtitle  ? @{$self->subtitle}  : () ),
     qw(4 5 6);
   #x 'titlesummary', $self;
   return $summary;
@@ -667,6 +678,7 @@ has 'title' => ( isa=>'Title', is=>'rw', lazy_build=>1 );
 method _build_title {
   my $longest;
   for my $obj ( @{ $self->media->container->titles } ) {
+    next unless $obj->selected;
     $longest = $obj, next unless $longest;
     $longest = $obj if
       $obj->length and $longest->length and
@@ -700,7 +712,7 @@ method selecttitles {
       'm',
       {
          prompt => 'Select Titles',
-         title  => 'Track,Length,#Chapters,Video,Display,Audio,Subtitle',
+         title  => 'Track,Length,#Chapters,Video,Display,Audio:Subtitle',
          items  => \@items,
          return_base                => 1,
          accept_multiple_selections => 1,
@@ -727,12 +739,10 @@ method menu {
     print <<EOF;
 Video Conversion Options
 ------------------------
-a) Autocrop [n]           g) Folder                r) Resolution/Padding
-b) Adjust crop [w:h:x:y]  h) Chapter-by-Chapter    s) Preview start-end
-c) Cancel crop [n]        i) Encoding Information  t) Change Title
-                          l) Language [a:s]        w) Write batch
-f) File names             m) Menu                  q) Quit
-                          p) Preview [n]           u) Select/unselect
+a) Autocrop [n]           h) Chapter-by-Chapter    s) Preview start-end
+b) Adjust crop [w:h:x:y]  i) Encoding Information  w) Write batch
+c) Cancel crop [n]        l) Language [a:s]        q) Quit
+                          p) Preview [n]
 Current Title: $titleid
 EOF
 
@@ -761,7 +771,7 @@ method tuning {
 
     given ( $command ) {
       # Select Title, Info, Preview, Quit
-      when ( /^\d$/ ) { $title = $self->titleid($command) }
+      when ( /^\d$/ ) { $self->title($container->idtitle($command)) }
       when ( 'i'    ) { $self->datadump }
       when ( 'p'    ) { $title->preview }
       when ( 'q'    ) { $done = 1 }
@@ -771,8 +781,10 @@ method tuning {
       when ( 'b' ) { my%c; @c{qw(w h x y)}=split /[x:]/,$arg; $title->crop(Area->new(%c,pixelaspect=>$title->video->pixelaspect)) }
       when ( 'c' ) { $title->crop($title->video)                 }
 
-      # Language
+      # Language, Chapters, Sample
       when ( 'l' ) { $title->language->set($arg) }
+      when ( 'h' ) { $title->chapterbychapter(1-$title->chapterbychapter) }
+      when ( 's' ) { $title->sample($arg) }
 
       #/^c\s*(.*)/  and croppreview($1 || $dvd{current}),         next;
       #/^d/         and print "Not implemented\n";
@@ -795,7 +807,7 @@ method tuning {
   return $self;
 }
 
-# Print input and output data
+# Print input and output data for selected titles
 #
 method datadump {
   my $titles = $self->media->container->titles;
@@ -804,19 +816,21 @@ method datadump {
     next unless $title->selected;
     #x 'title datadump', $title;
     printf "Title %s\n", $title->id;
-    print "  Input:\n";
+    print  "  Input:\n";
     printf "    %-8s: %s\n", ucfirst($_), $title->$_ for qw(length fps chapters);
     printf "    Video   : %s\n", $title->video->wxh;
     printf "    Display : %s\n", $title->video->display->wxh;
     printf "    Aspect  : %s\n", $title->video->fraction;
-    printf "    Audio   : %s\n", join ',', @{ $title->audiolang };
-    printf "    Subtitle: %s\n", join ',', @{ $title->subtitle };
-    print "  Output:\n";
+    printf "    Audio   : %s\n", join ',', @{ $title->language->available_audio };
+    printf "    Subtitle: %s\n", join ',', @{ $title->language->available_subtitle };
+    print  "  Output:\n";
     printf "    Audio   : %s\n", $title->language->audio;
     printf "    Subtitle: %s\n", $title->language->subtitle;
+    printf "    Each chp: %s\n", $title->chapterbychapter;
     printf "    Device  : %s\n", $title->device->wxh;
     printf "    Crop    : %s\n", $title->crop->line;
     printf "    Resize  : %s\n", $title->crop->scale_to_fit($title->device)->wxh;
+    printf "    Sample  : %s\n", join '-', $title->samplestart, $title->samplestart+$title->samplelength;
 
   }
   return $self;
