@@ -421,7 +421,7 @@ method cmd ( Str $action, Ref $title?, Int $chapter? ) {
 ffmpeg -i %s.tmp \
   -ac 2 \
   -vcodec libx264 \
-  -vpre hq \
+  -vpre normal \
   -vpre main \
   -level 30 \
   -b 1400k \
