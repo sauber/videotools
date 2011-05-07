@@ -348,7 +348,7 @@ requires 'titlesource';
 method cmd ( Str $action, Ref $title?, Int $chapter? ) {
   given ( $action ) {
     when ( 'scanmedia' ) { return sprintf
-      'mplayer -identify -frames 1 -vo null -ao null %s',
+      'mplayer -identify -frames 0 -vo null -ao null %s',
       $self->mediasource()
     }
 
@@ -388,7 +388,7 @@ method cmd ( Str $action, Ref $title?, Int $chapter? ) {
     when ( 'encode' ) {
       # Input Video Filter
       my $vf = "-vf kerndeint";
-      $vf .= sprintf ",crop=%", $title->crop->line
+      $vf .= sprintf ",crop=%s", $title->crop->line
         if $title->crop->line ne $title->video->line;
       $vf .= sprintf ",scale=%s", $title->crop->scale_to_fit($title->device)->wch
         if $title->crop->scale_to_fit($title->device)->wxh ne $title->video->wxh;
@@ -525,7 +525,7 @@ method mediasource  {
 }
 
 method titlesource ( Ref $title? )  {
-  '"' . $self->mediasource . '"'; 
+  $self->mediasource;
 }
 
 method titletarget ( Ref $title?, Any $chapter? ) {
@@ -593,7 +593,7 @@ method _build_titles {
       container => $self,
       ( $title{$_}{length}   ? ( length   => $title{$_}{length}   ) : () ),
       ( $title{$_}{chapters} ? ( chapters => $title{$_}{chapters} ) : () ),
-    ), sort { $a <=> $b } keys %title ];
+    ), sort { $a <=> $b } grep /^\d+$/, keys %title ];
 
 }
 
@@ -646,7 +646,7 @@ method _build_language {
 }
 
 has 'length'    => ( isa=>'Num', is =>'ro', lazy_build=>1 );
-method _build_length { $self->_input->{length} }
+method _build_length { $self->_input->{length} || 0 }
 
 has 'crop' => ( isa=>'Area', is=>'rw', lazy_build=>1 );
 method _build_crop { $self->video }
@@ -697,7 +697,7 @@ has device => (
   is=>'ro',
   default=>sub {
     my $self = shift;
-    my $h = $self->fps <= 25 ? 576 : 480;
+    my $h = ( $self->fps and $self->fps <= 25 ) ? 576 : 480;
     return Area->new( w=>720, h=>$h, pixelaspect=>(16/9)/(720/$h) );
   },
 );
