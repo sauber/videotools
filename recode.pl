@@ -882,7 +882,7 @@ method tuning {
 
       # Cropping
       when ( 'a' ) { $title->crop($title->cropdetect)                      }
-      when ( 'b' ) { my%c; @c{qw(w h x y)}=split /[x:]/,$arg; $title->crop(Area->new(%c,pixelaspect=>$title->video->pixelaspect)) }
+      when ( 'b' ) { continue unless $arg; my%c; @c{qw(w h x y)}=split /[x:]/,$arg; $title->crop(Area->new(%c,pixelaspect=>$title->video->pixelaspect)) }
       when ( 'c' ) { $title->crop($title->video)                 }
 
       # Language, Chapters, Sample
