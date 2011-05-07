@@ -426,6 +426,7 @@ ffmpeg -i %s.tmp \
   -b 1400k \
   -s %s \
   -aspect 16:9 \
+  -threads 0 \
   -y %s
 
 rm %s.tmp
