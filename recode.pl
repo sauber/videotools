@@ -291,17 +291,19 @@ method _build_container {
   return File->new( media => $self );
 }
 
-has batchname => ( isa=>'Str', is=>'ro', default=>sub{
+has batchname => ( isa=>'Str', is=>'ro', lazy_build=>1 );
+method _build_batchname {
   my $source = shift->source;
   $source =~ s,/*+$,,; # Remove trailing /
   $source . ".batch.sh";
-});
+}
 
-has dstfolder => ( isa=>'Str', is=>'ro', default=>sub{
+has dstfolder => ( isa=>'Str', is=>'ro', lazy_build=>1 );
+method _build_dstfolder {
   my $source = shift->source;
   $source =~ s,/*+$,,; # Remove trailing /
   $source . ".psp";
-});
+}
 
 method write_batch {
   warn sprintf "*** media write_batch write to %s\n", $self->batchname;
@@ -760,9 +762,9 @@ method titlesummary {
 }
 
 
-sub DEMOLISH {
-  confess;
-}
+#sub DEMOLISH {
+#  confess;
+#}
 
 __PACKAGE__->meta->make_immutable;
 
